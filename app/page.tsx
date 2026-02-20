@@ -1,7 +1,9 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
+import { parsePlayerSearch } from "@/lib/search";
 import {
   PlayerInsightTerm,
   PlayersApiResponse,
@@ -40,6 +42,7 @@ const ATTRIBUTE_TAGS = [
 ] as const;
 
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
+const CLIENT_FETCH_TIMEOUT_MS = 6000;
 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
@@ -67,6 +70,35 @@ function normalizeInsightTerms(terms: PlayerInsightTerm[] | undefined) {
       term.text.trim().length > 0 &&
       Number.isFinite(term.count)
   );
+}
+
+function queryClientMockPlayers(tab: PlayerTab, query: string, limit = 30) {
+  const parsed = parsePlayerSearch(query);
+  const isOvrOnlyQuery =
+    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
+  const allowedPositions = new Set(POSITION_GROUPS[tab]);
+  const queryText = parsed.nameQuery.trim().toLowerCase();
+
+  let rows = LOCAL_MOCK_PLAYERS;
+  if (!isOvrOnlyQuery) {
+    rows = rows.filter((row) => allowedPositions.has(row.base_position));
+  }
+  if (parsed.requestedOvr !== null) {
+    rows = rows.filter((row) => row.base_ovr === parsed.requestedOvr);
+  }
+  if (queryText) {
+    rows = rows.filter((row) => row.player_name.toLowerCase().includes(queryText));
+  }
+
+  rows.sort((a, b) => {
+    const scoreA = a.avg_sentiment_score ?? -1;
+    const scoreB = b.avg_sentiment_score ?? -1;
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    if (a.mention_count !== b.mention_count) return b.mention_count - a.mention_count;
+    return b.base_ovr - a.base_ovr;
+  });
+
+  return rows.slice(0, limit);
 }
 
 function buildInitialReviewForm(player: PlayerRow): ReviewFormState {
@@ -184,6 +216,7 @@ export default function HomePage() {
   const [queryDraft, setQueryDraft] = useState("");
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<PlayerRow[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [state, setState] = useState<FetchState>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -197,11 +230,21 @@ export default function HomePage() {
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
     []
   );
+  const reviewPlayerOptions = rows.length ? rows : LOCAL_MOCK_PLAYERS;
 
   useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
     let cancelled = false;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      CLIENT_FETCH_TIMEOUT_MS
+    );
 
     async function load() {
       setState("loading");
@@ -228,6 +271,14 @@ export default function HomePage() {
         }
       } catch (err) {
         if (cancelled) return;
+        const fallbackRows = queryClientMockPlayers(activeTab, query);
+        if (fallbackRows.length > 0) {
+          setRows(fallbackRows);
+          setState("success");
+          setError(null);
+          return;
+        }
+
         setState("error");
         if (err instanceof Error && err.name === "AbortError") {
           setError("Request timed out. Please refresh or try again.");
@@ -244,7 +295,7 @@ export default function HomePage() {
       controller.abort();
       clearTimeout(timeoutId);
     };
-  }, [activeTab, query]);
+  }, [isHydrated, activeTab, query]);
 
   const onSubmitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -262,12 +313,15 @@ export default function HomePage() {
   };
 
   const onOpenGlobalAddReview = () => {
-    if (!rows.length) return;
-    onSelectPlayerForReview(selectedPlayer ?? selectedInsightPlayer ?? rows[0]);
+    onSelectPlayerForReview(
+      selectedPlayer ?? selectedInsightPlayer ?? reviewPlayerOptions[0]
+    );
   };
 
   const onChangeReviewPlayer = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextPlayer = rows.find((row) => row.player_id === event.target.value);
+    const nextPlayer = reviewPlayerOptions.find(
+      (row) => row.player_id === event.target.value
+    );
     if (!nextPlayer) return;
     onSelectPlayerForReview(nextPlayer);
   };
@@ -415,6 +469,14 @@ export default function HomePage() {
       setIsSubmittingReview(false);
     }
   };
+
+  if (!isHydrated) {
+    return (
+      <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
+        <LoadingCards />
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
@@ -648,7 +710,7 @@ export default function HomePage() {
                 onChange={onChangeReviewPlayer}
                 className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
               >
-                {rows.map((row) => (
+                {reviewPlayerOptions.map((row) => (
                   <option
                     key={row.player_id}
                     value={row.player_id}
