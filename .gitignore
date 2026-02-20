@@ -17,6 +17,7 @@ out/
 # Build / coverage
 dist/
 coverage/
+*.tsbuildinfo
 
 # OS / editor noise
 .DS_Store
@@ -25,4 +26,3 @@ coverage/
 
 # Temp logs
 *.log
-
