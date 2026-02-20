@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(MAX_LIMIT, limitRaw))
     : 30;
+  const isOvrOnlyQuery =
+    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
 
   if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
     const rows = queryLocalMockPlayers({
@@ -78,10 +80,12 @@ export async function GET(request: NextRequest) {
   const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
   url.searchParams.set("select", MV_FIELDS);
   url.searchParams.set("mention_count", "gt.0");
-  url.searchParams.set(
-    "base_position",
-    `in.(${POSITION_GROUPS[tab].join(",")})`
-  );
+  if (!isOvrOnlyQuery) {
+    url.searchParams.set(
+      "base_position",
+      `in.(${POSITION_GROUPS[tab].join(",")})`
+    );
+  }
   url.searchParams.set("order", "avg_sentiment_score.desc.nullslast,mention_count.desc,base_ovr.desc");
   url.searchParams.set("limit", String(limit));
 

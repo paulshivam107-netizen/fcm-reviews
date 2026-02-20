@@ -87,15 +87,26 @@ function LoadingCards() {
 function PlayerCard({
   row,
   index,
+  onOpenPlayer,
   onAddReview,
 }: {
   row: PlayerRow;
   index: number;
+  onOpenPlayer: (player: PlayerRow) => void;
   onAddReview: (player: PlayerRow) => void;
 }) {
   return (
     <article
-      className="glass-panel card-reveal rounded-2xl p-4 transition duration-300 hover:border-lime-300/50"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenPlayer(row)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenPlayer(row);
+        }
+      }}
+      className="glass-panel card-reveal cursor-pointer rounded-2xl p-4 transition duration-300 hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50"
       style={{ animationDelay: `${Math.min(index * 45, 220)}ms` }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -127,7 +138,10 @@ function PlayerCard({
       <div className="mt-4">
         <button
           type="button"
-          onClick={() => onAddReview(row)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onAddReview(row);
+          }}
           className="w-full rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
         >
           Add Review
@@ -452,6 +466,7 @@ export default function HomePage() {
               key={row.player_id}
               row={row}
               index={index}
+              onOpenPlayer={onSelectPlayerForReview}
               onAddReview={onSelectPlayerForReview}
             />
           ))}

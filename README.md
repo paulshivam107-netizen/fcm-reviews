@@ -75,4 +75,5 @@ Seeded demo content includes:
 Search behavior:
 
 - `113 messi` => strict `OVR = 113`, name filtered
+- `113` => strict `OVR = 113` and returns all matching cards (all positions)
 - `messi` => name filtered only

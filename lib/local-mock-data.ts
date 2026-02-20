@@ -116,12 +116,16 @@ export function queryLocalMockPlayers(args: {
   positionGroups: Record<PlayerTab, string[]>;
 }): PlayerRow[] {
   const { tab, parsed, limit, positionGroups } = args;
+  const isOvrOnlyQuery =
+    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const allowedPositions = new Set(positionGroups[tab]);
   const query = parsed.nameQuery.trim().toLowerCase();
 
-  let rows = LOCAL_MOCK_PLAYERS.filter((row) =>
-    allowedPositions.has(row.base_position)
-  );
+  let rows = LOCAL_MOCK_PLAYERS;
+
+  if (!isOvrOnlyQuery) {
+    rows = rows.filter((row) => allowedPositions.has(row.base_position));
+  }
 
   if (parsed.requestedOvr !== null) {
     rows = rows.filter((row) => row.base_ovr === parsed.requestedOvr);
