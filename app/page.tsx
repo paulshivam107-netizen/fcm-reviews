@@ -2,7 +2,12 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
-import { PlayersApiResponse, PlayerRow, PlayerTab } from "@/types/player";
+import {
+  PlayerInsightTerm,
+  PlayersApiResponse,
+  PlayerRow,
+  PlayerTab,
+} from "@/types/player";
 import { SubmittedUsernameType } from "@/types/review";
 
 type FetchState = "idle" | "loading" | "success" | "error";
@@ -39,6 +44,29 @@ const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
   return `${score.toFixed(1)}/10`;
+}
+
+function formatLastProcessedAt(timestamp: string | null) {
+  if (!timestamp) return "Unknown";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function normalizeInsightTerms(terms: PlayerInsightTerm[] | undefined) {
+  if (!Array.isArray(terms)) return [];
+  return terms.filter(
+    (term) =>
+      term &&
+      typeof term.text === "string" &&
+      term.text.trim().length > 0 &&
+      Number.isFinite(term.count)
+  );
 }
 
 function buildInitialReviewForm(player: PlayerRow): ReviewFormState {
@@ -87,23 +115,23 @@ function LoadingCards() {
 function PlayerCard({
   row,
   index,
-  onOpenPlayer,
+  onOpenInsights,
   onAddReview,
 }: {
   row: PlayerRow;
   index: number;
-  onOpenPlayer: (player: PlayerRow) => void;
+  onOpenInsights: (player: PlayerRow) => void;
   onAddReview: (player: PlayerRow) => void;
 }) {
   return (
     <article
       role="button"
       tabIndex={0}
-      onClick={() => onOpenPlayer(row)}
+      onClick={() => onOpenInsights(row)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpenPlayer(row);
+          onOpenInsights(row);
         }
       }}
       className="glass-panel card-reveal cursor-pointer rounded-2xl p-4 transition duration-300 hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50"
@@ -159,6 +187,7 @@ export default function HomePage() {
   const [state, setState] = useState<FetchState>("idle");
   const [error, setError] = useState<string | null>(null);
 
+  const [selectedInsightPlayer, setSelectedInsightPlayer] = useState<PlayerRow | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerRow | null>(null);
   const [reviewForm, setReviewForm] = useState<ReviewFormState | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
@@ -221,9 +250,13 @@ export default function HomePage() {
     setReviewFeedback(null);
   };
 
+  const onSelectPlayerForInsights = (player: PlayerRow) => {
+    setSelectedInsightPlayer(player);
+  };
+
   const onOpenGlobalAddReview = () => {
     if (!rows.length) return;
-    onSelectPlayerForReview(selectedPlayer ?? rows[0]);
+    onSelectPlayerForReview(selectedPlayer ?? selectedInsightPlayer ?? rows[0]);
   };
 
   const onChangeReviewPlayer = (event: ChangeEvent<HTMLSelectElement>) => {
@@ -236,6 +269,10 @@ export default function HomePage() {
     setSelectedPlayer(null);
     setReviewForm(null);
     setReviewFeedback(null);
+  };
+
+  const closeInsightPanel = () => {
+    setSelectedInsightPlayer(null);
   };
 
   const onChangeReviewField =
@@ -466,11 +503,113 @@ export default function HomePage() {
               key={row.player_id}
               row={row}
               index={index}
-              onOpenPlayer={onSelectPlayerForReview}
+              onOpenInsights={onSelectPlayerForInsights}
               onAddReview={onSelectPlayerForReview}
             />
           ))}
       </section>
+
+      {selectedInsightPlayer && (
+        <section className="glass-panel mt-6 rounded-2xl p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-lime-200">
+                Card Rating
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">
+                {selectedInsightPlayer.player_name} · {selectedInsightPlayer.base_ovr}
+              </h2>
+              <p className="text-xs text-slate-300">
+                Community + system summary for this card.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeInsightPanel}
+              className="rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-300"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                Sentiment
+              </p>
+              <p className="mt-1 text-sm font-semibold text-lime-200">
+                {formatSentiment(selectedInsightPlayer.avg_sentiment_score)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                Mentions
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">
+                {selectedInsightPlayer.mention_count}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                Last Update
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-200">
+                {formatLastProcessedAt(selectedInsightPlayer.last_processed_at)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">
+                Top Pros
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {normalizeInsightTerms(selectedInsightPlayer.top_pros).length ? (
+                  normalizeInsightTerms(selectedInsightPlayer.top_pros).map((term) => (
+                    <span
+                      key={`pro-${term.text}`}
+                      className="rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs text-lime-100"
+                    >
+                      {term.text} ({term.count})
+                    </span>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400">No pro highlights yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-rose-200">
+                Top Cons
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {normalizeInsightTerms(selectedInsightPlayer.top_cons).length ? (
+                  normalizeInsightTerms(selectedInsightPlayer.top_cons).map((term) => (
+                    <span
+                      key={`con-${term.text}`}
+                      className="rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-1 text-xs text-rose-100"
+                    >
+                      {term.text} ({term.count})
+                    </span>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400">No con highlights yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onSelectPlayerForReview(selectedInsightPlayer)}
+            className="mt-4 w-full rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+          >
+            Add Review For This Card
+          </button>
+        </section>
+      )}
 
       {selectedPlayer && reviewForm && (
         <section className="glass-panel mt-6 rounded-2xl p-4">

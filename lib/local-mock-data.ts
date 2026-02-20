@@ -26,6 +26,15 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     program_promo: "Glorious Era",
     mention_count: 14,
     avg_sentiment_score: 8.9,
+    top_pros: [
+      { text: "pace", count: 9 },
+      { text: "dribbling", count: 7 },
+      { text: "finesse shots", count: 6 },
+    ],
+    top_cons: [
+      { text: "weak foot", count: 8 },
+      { text: "stamina", count: 6 },
+    ],
     last_processed_at: "2026-02-20T19:00:00.000Z",
   },
   {
@@ -36,6 +45,11 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     program_promo: "TOTY",
     mention_count: 51,
     avg_sentiment_score: 9.3,
+    top_pros: [
+      { text: "dribbling", count: 34 },
+      { text: "finesse shots", count: 30 },
+    ],
+    top_cons: [{ text: "physical", count: 8 }],
     last_processed_at: "2026-02-20T19:00:00.000Z",
   },
   {
@@ -46,6 +60,11 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     program_promo: "UTOTY",
     mention_count: 38,
     avg_sentiment_score: 8.8,
+    top_pros: [
+      { text: "positioning", count: 22 },
+      { text: "passing", count: 20 },
+    ],
+    top_cons: [{ text: "pace", count: 11 }],
     last_processed_at: "2026-02-20T19:00:00.000Z",
   },
   {
@@ -56,6 +75,11 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     program_promo: "TOTY",
     mention_count: 43,
     avg_sentiment_score: 9.1,
+    top_pros: [
+      { text: "physical", count: 31 },
+      { text: "defending", count: 27 },
+    ],
+    top_cons: [{ text: "turning", count: 9 }],
     last_processed_at: "2026-02-20T19:00:00.000Z",
   },
   {
@@ -66,6 +90,8 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     program_promo: "TOTY",
     mention_count: 24,
     avg_sentiment_score: 8.5,
+    top_pros: [{ text: "shot stopping", count: 16 }],
+    top_cons: [{ text: "distribution", count: 8 }],
     last_processed_at: "2026-02-20T19:00:00.000Z",
   },
 ];

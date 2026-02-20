@@ -12,6 +12,8 @@ const MV_FIELDS = [
   "program_promo",
   "mention_count",
   "avg_sentiment_score",
+  "top_pros",
+  "top_cons",
   "last_processed_at",
 ].join(",");
 
