@@ -211,6 +211,121 @@ function PlayerCard({
   );
 }
 
+function InsightPanel({
+  player,
+  onClose,
+  onAddReview,
+}: {
+  player: PlayerRow;
+  onClose: () => void;
+  onAddReview: (player: PlayerRow) => void;
+}) {
+  const pros = normalizeInsightTerms(player.top_pros);
+  const cons = normalizeInsightTerms(player.top_cons);
+
+  return (
+    <section className="glass-panel mt-3 rounded-2xl p-4">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-lime-200">
+            Card Rating
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-slate-100">
+            {player.player_name} · {player.base_ovr}
+          </h2>
+          <p className="text-xs text-slate-300">
+            Community + system summary for this card.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-300"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+            Sentiment
+          </p>
+          <p className="mt-1 text-sm font-semibold text-lime-200">
+            {formatSentiment(player.avg_sentiment_score)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+            Mentions
+          </p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">
+            {player.mention_count}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+            Last Update
+          </p>
+          <p className="mt-1 text-xs font-medium text-slate-200">
+            {formatLastProcessedAt(player.last_processed_at)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">
+            Top Pros
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pros.length ? (
+              pros.map((term) => (
+                <span
+                  key={`pro-${term.text}`}
+                  className="rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs text-lime-100"
+                >
+                  {term.text} ({term.count})
+                </span>
+              ))
+            ) : (
+              <p className="text-xs text-slate-400">No pro highlights yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-rose-200">
+            Top Cons
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {cons.length ? (
+              cons.map((term) => (
+                <span
+                  key={`con-${term.text}`}
+                  className="rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-1 text-xs text-rose-100"
+                >
+                  {term.text} ({term.count})
+                </span>
+              ))
+            ) : (
+              <p className="text-xs text-slate-400">No con highlights yet.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onAddReview(player)}
+        className="mt-4 w-full rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+      >
+        Add Review For This Card
+      </button>
+    </section>
+  );
+}
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<PlayerTab>("attacker");
   const [queryDraft, setQueryDraft] = useState("");
@@ -309,7 +424,9 @@ export default function HomePage() {
   };
 
   const onSelectPlayerForInsights = (player: PlayerRow) => {
-    setSelectedInsightPlayer(player);
+    setSelectedInsightPlayer((current) =>
+      current?.player_id === player.player_id ? null : player
+    );
   };
 
   const onOpenGlobalAddReview = () => {
@@ -330,10 +447,6 @@ export default function HomePage() {
     setSelectedPlayer(null);
     setReviewForm(null);
     setReviewFeedback(null);
-  };
-
-  const closeInsightPanel = () => {
-    setSelectedInsightPlayer(null);
   };
 
   const onChangeReviewField =
@@ -567,117 +680,23 @@ export default function HomePage() {
 
         {state === "success" &&
           rows.map((row, index) => (
-            <PlayerCard
-              key={row.player_id}
-              row={row}
-              index={index}
-              onOpenInsights={onSelectPlayerForInsights}
-              onAddReview={onSelectPlayerForReview}
-            />
+            <div key={row.player_id}>
+              <PlayerCard
+                row={row}
+                index={index}
+                onOpenInsights={onSelectPlayerForInsights}
+                onAddReview={onSelectPlayerForReview}
+              />
+              {selectedInsightPlayer?.player_id === row.player_id && (
+                <InsightPanel
+                  player={row}
+                  onClose={() => setSelectedInsightPlayer(null)}
+                  onAddReview={onSelectPlayerForReview}
+                />
+              )}
+            </div>
           ))}
       </section>
-
-      {selectedInsightPlayer && (
-        <section className="glass-panel mt-6 rounded-2xl p-4">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.12em] text-lime-200">
-                Card Rating
-              </p>
-              <h2 className="mt-1 text-lg font-semibold text-slate-100">
-                {selectedInsightPlayer.player_name} · {selectedInsightPlayer.base_ovr}
-              </h2>
-              <p className="text-xs text-slate-300">
-                Community + system summary for this card.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={closeInsightPanel}
-              className="rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-300"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
-              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                Sentiment
-              </p>
-              <p className="mt-1 text-sm font-semibold text-lime-200">
-                {formatSentiment(selectedInsightPlayer.avg_sentiment_score)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
-              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                Mentions
-              </p>
-              <p className="mt-1 text-sm font-semibold text-slate-100">
-                {selectedInsightPlayer.mention_count}
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-3">
-              <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                Last Update
-              </p>
-              <p className="mt-1 text-xs font-medium text-slate-200">
-                {formatLastProcessedAt(selectedInsightPlayer.last_processed_at)}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">
-                Top Pros
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {normalizeInsightTerms(selectedInsightPlayer.top_pros).length ? (
-                  normalizeInsightTerms(selectedInsightPlayer.top_pros).map((term) => (
-                    <span
-                      key={`pro-${term.text}`}
-                      className="rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs text-lime-100"
-                    >
-                      {term.text} ({term.count})
-                    </span>
-                  ))
-                ) : (
-                  <p className="text-xs text-slate-400">No pro highlights yet.</p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-rose-200">
-                Top Cons
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {normalizeInsightTerms(selectedInsightPlayer.top_cons).length ? (
-                  normalizeInsightTerms(selectedInsightPlayer.top_cons).map((term) => (
-                    <span
-                      key={`con-${term.text}`}
-                      className="rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-1 text-xs text-rose-100"
-                    >
-                      {term.text} ({term.count})
-                    </span>
-                  ))
-                ) : (
-                  <p className="text-xs text-slate-400">No con highlights yet.</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onSelectPlayerForReview(selectedInsightPlayer)}
-            className="mt-4 w-full rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
-          >
-            Add Review For This Card
-          </button>
-        </section>
-      )}
 
       {selectedPlayer && reviewForm && (
         <section className="glass-panel mt-6 rounded-2xl p-4">
