@@ -132,10 +132,19 @@ export default function HomePage() {
   };
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
+      <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
       <header className="mb-6">
-        <p className="text-2xl font-bold leading-tight text-slate-100 sm:text-3xl">
-          Find your favorite player reviews
+        <p className="mb-2 inline-flex items-center rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-lime-200">
+          FC Mobile Reviews
+        </p>
+        <h1 className="text-2xl font-bold leading-tight text-slate-100 sm:text-3xl">
+          Scout The Meta.
+          <span className="block bg-gradient-to-r from-lime-200 to-lime-400 bg-clip-text text-transparent">
+            Pick Better Players.
+          </span>
+        </h1>
+        <p className="mt-2 max-w-[32ch] text-sm text-slate-300">
+          Real community sentiment for the cards people actually use.
         </p>
       </header>
 
