@@ -1,0 +1,23 @@
+[
+  {
+    "player_name": "Lionel Messi",
+    "base_ovr": 113,
+    "base_position": "RW",
+    "program_promo": "TOTY",
+    "aliases": ["Messi", "113 Messi"]
+  },
+  {
+    "player_name": "Johan Cruyff",
+    "base_ovr": 117,
+    "base_position": "CF",
+    "program_promo": "Icon",
+    "aliases": ["Cruyff", "117 Cruyff"]
+  },
+  {
+    "player_name": "Hristo Stoichkov",
+    "base_ovr": 115,
+    "base_position": "LW",
+    "program_promo": "Icon",
+    "aliases": ["Stoichkov", "115 Stoichkov"]
+  }
+]
