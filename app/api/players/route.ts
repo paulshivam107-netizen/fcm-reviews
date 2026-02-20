@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { queryLocalMockPlayers, shouldUseLocalMockData } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
-import { PlayerRow } from "@/types/player";
+import { PlayerRow, PlayerTab } from "@/types/player";
 
 const MV_FIELDS = [
   "player_id",
@@ -18,9 +18,38 @@ const MV_FIELDS = [
 ].join(",");
 
 const MAX_LIMIT = 60;
+const SUPABASE_REQUEST_TIMEOUT_MS = 9000;
 
 function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
+}
+
+function buildPlayersResponse(args: {
+  rows: PlayerRow[];
+  tab: PlayerTab;
+  parsed: ReturnType<typeof parsePlayerSearch>;
+  cacheControl: string;
+  dataSource: "supabase" | "local-mock" | "local-mock-fallback";
+}) {
+  const { rows, tab, parsed, cacheControl, dataSource } = args;
+
+  return NextResponse.json(
+    {
+      items: rows,
+      meta: {
+        tab,
+        query: parsed.raw,
+        requestedOvr: parsed.requestedOvr,
+        count: rows.length,
+      },
+    },
+    {
+      headers: {
+        "Cache-Control": cacheControl,
+        "X-Data-Source": dataSource,
+      },
+    }
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -40,36 +69,42 @@ export async function GET(request: NextRequest) {
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(MAX_LIMIT, limitRaw))
     : 30;
+  const allowMockFallback =
+    String(
+      process.env.USE_LOCAL_MOCK_FALLBACK ??
+        (process.env.NODE_ENV === "production" ? "false" : "true")
+    ).toLowerCase() !== "false";
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
-
-  if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
-    const rows = queryLocalMockPlayers({
+  const getMockRows = () =>
+    queryLocalMockPlayers({
       tab,
       parsed,
       limit,
       positionGroups: POSITION_GROUPS,
     });
 
-    return NextResponse.json(
-      {
-        items: rows,
-        meta: {
-          tab,
-          query: parsed.raw,
-          requestedOvr: parsed.requestedOvr,
-          count: rows.length,
-        },
-      },
-      {
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      }
-    );
+  if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
+    return buildPlayersResponse({
+      rows: getMockRows(),
+      tab,
+      parsed,
+      cacheControl: "no-store",
+      dataSource: "local-mock",
+    });
   }
 
   if (!supabaseUrl || !supabaseKey) {
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
     return NextResponse.json(
       {
         error:
@@ -102,16 +137,56 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const response = await fetch(url, {
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-    },
-    next: { revalidate: 300 },
-  });
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    SUPABASE_REQUEST_TIMEOUT_MS
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        error: "Supabase request failed",
+        details: error instanceof Error ? error.message : "Unknown fetch error",
+      },
+      { status: 500 }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
     return NextResponse.json(
       { error: "Supabase query failed", details: errorText.slice(0, 500) },
       { status: 500 }
@@ -120,20 +195,11 @@ export async function GET(request: NextRequest) {
 
   const rows = (await response.json()) as PlayerRow[];
 
-  return NextResponse.json(
-    {
-      items: rows,
-      meta: {
-        tab,
-        query: parsed.raw,
-        requestedOvr: parsed.requestedOvr,
-        count: rows.length,
-      },
-    },
-    {
-      headers: {
-        "Cache-Control": "s-maxage=300, stale-while-revalidate=3600",
-      },
-    }
-  );
+  return buildPlayersResponse({
+    rows,
+    tab,
+    parsed,
+    cacheControl: "s-maxage=300, stale-while-revalidate=3600",
+    dataSource: "supabase",
+  });
 }

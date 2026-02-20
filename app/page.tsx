@@ -201,6 +201,7 @@ export default function HomePage() {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     async function load() {
       setState("loading");
@@ -228,6 +229,11 @@ export default function HomePage() {
       } catch (err) {
         if (cancelled) return;
         setState("error");
+        if (err instanceof Error && err.name === "AbortError") {
+          setError("Request timed out. Please refresh or try again.");
+          return;
+        }
+
         setError(err instanceof Error ? err.message : "Unknown error");
       }
     }
@@ -236,6 +242,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
       controller.abort();
+      clearTimeout(timeoutId);
     };
   }, [activeTab, query]);
 
@@ -428,8 +435,7 @@ export default function HomePage() {
           <button
             type="button"
             onClick={onOpenGlobalAddReview}
-            disabled={state !== "success" || rows.length === 0}
-            className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
           >
             Add Review
           </button>

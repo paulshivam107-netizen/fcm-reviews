@@ -31,6 +31,7 @@ Set:
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
+- `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
 
 3. Start dev server:
 
