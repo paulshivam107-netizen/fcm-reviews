@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-main: #08121a;
+  --bg-card: rgba(16, 30, 44, 0.72);
+  --bg-pill: rgba(255, 255, 255, 0.06);
+  --text-main: #f3f8ff;
+  --text-muted: #b5c4d8;
+  --accent: #b8f56a;
+  --border-soft: rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg-main);
+  color: var(--text-main);
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 15% -5%, rgba(184, 245, 106, 0.18), transparent 42%),
+    radial-gradient(circle at 100% 8%, rgba(42, 138, 255, 0.2), transparent 36%),
+    linear-gradient(160deg, #07111a 0%, #0a1824 48%, #0c1f2d 100%);
+  background-attachment: fixed;
+}
+
+.soft-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.soft-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+}
+
+.glass-panel {
+  background: linear-gradient(180deg, rgba(20, 36, 54, 0.82), rgba(14, 29, 43, 0.7));
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(14px);
+}
+
+.star-track {
+  letter-spacing: 1px;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+@keyframes riseFade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card-reveal {
+  animation: riseFade 320ms ease both;
+}
