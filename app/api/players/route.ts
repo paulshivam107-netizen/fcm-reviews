@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { queryLocalMockPlayers, shouldUseLocalMockData } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
 import { PlayerRow } from "@/types/player";
@@ -47,6 +48,32 @@ export async function GET(request: NextRequest) {
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(MAX_LIMIT, limitRaw))
     : 30;
+
+  if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
+    const rows = queryLocalMockPlayers({
+      tab,
+      parsed,
+      limit,
+      positionGroups: POSITION_GROUPS,
+    });
+
+    return NextResponse.json(
+      {
+        items: rows,
+        meta: {
+          tab,
+          query: parsed.raw,
+          requestedOvr: parsed.requestedOvr,
+          count: rows.length,
+        },
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  }
 
   const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
   url.searchParams.set("select", MV_FIELDS);

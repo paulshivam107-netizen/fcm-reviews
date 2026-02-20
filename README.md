@@ -30,6 +30,7 @@ Set:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional fallback)
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
+- `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 
 3. Start dev server:
 
@@ -61,6 +62,15 @@ npm run dev
 The frontend reads from `public.mv_player_sentiment_summary` via `GET /api/players`.
 
 Review submissions write to `public.user_review_submissions` via `POST /api/reviews`.
+
+## Local mock mode
+
+Set `USE_LOCAL_MOCK_DATA=true` to bypass Supabase reads/writes during local UI testing.
+
+Seeded demo content includes:
+
+- Harry Kewell (Glorious Era, 113 LW) player card
+- One demo review derived from your provided Kewell notes
 
 Search behavior:
 

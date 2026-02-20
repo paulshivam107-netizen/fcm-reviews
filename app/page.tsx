@@ -207,6 +207,17 @@ export default function HomePage() {
     setReviewFeedback(null);
   };
 
+  const onOpenGlobalAddReview = () => {
+    if (!rows.length) return;
+    onSelectPlayerForReview(selectedPlayer ?? rows[0]);
+  };
+
+  const onChangeReviewPlayer = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextPlayer = rows.find((row) => row.player_id === event.target.value);
+    if (!nextPlayer) return;
+    onSelectPlayerForReview(nextPlayer);
+  };
+
   const closeReviewPanel = () => {
     setSelectedPlayer(null);
     setReviewForm(null);
@@ -362,6 +373,19 @@ export default function HomePage() {
         <p className="mt-2 max-w-[32ch] text-sm text-slate-300">
           Real community sentiment for the cards people actually use.
         </p>
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onOpenGlobalAddReview}
+            disabled={state !== "success" || rows.length === 0}
+            className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Add Review
+          </button>
+          <p className="text-xs text-slate-400">
+            Don&apos;t see your player? search first, then submit.
+          </p>
+        </div>
       </header>
 
       <form onSubmit={onSubmitSearch} className="mb-5">
@@ -457,6 +481,25 @@ export default function HomePage() {
           </div>
 
           <form onSubmit={onSubmitReview} className="space-y-4">
+            <label className="block text-xs text-slate-300">
+              Player
+              <select
+                value={selectedPlayer.player_id}
+                onChange={onChangeReviewPlayer}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              >
+                {rows.map((row) => (
+                  <option
+                    key={row.player_id}
+                    value={row.player_id}
+                    className="bg-slate-900 text-slate-100"
+                  >
+                    {row.player_name} · {row.base_ovr} · {row.base_position}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs text-slate-300">
                 Sentiment (1-10)
