@@ -229,7 +229,6 @@ async function adoptReviewedSiblingIfNeeded(args: {
         "updated_at",
       ].join(","),
       id: `neq.${updated.id}`,
-      is_active: "eq.true",
       base_position: `eq.${updated.base_position}`,
       player_name: `ilike.*${cleanedName}*`,
       limit: "20",
@@ -250,10 +249,43 @@ async function adoptReviewedSiblingIfNeeded(args: {
     return { mergedFromPlayerId: null, refreshed: false };
   }
 
-  const siblingSummaryMap = await loadSummaryMap(exactSiblings.map((row) => row.id));
-  const reviewedSiblings = exactSiblings.filter(
-    (row) => (siblingSummaryMap.get(row.id)?.mention_count ?? 0) > 0
-  );
+  const reviewedSiblings: SupabasePlayerRow[] = [];
+  for (const sibling of exactSiblings) {
+    const [redditMentionResponse, approvedUserReviewResponse] = await Promise.all([
+      supabaseRestRequest({
+        endpoint: "player_sentiment_mentions",
+        method: "GET",
+        query: {
+          select: "id",
+          player_id: `eq.${sibling.id}`,
+          limit: "1",
+        },
+        cache: "no-store",
+      }),
+      supabaseRestRequest({
+        endpoint: "user_review_submissions",
+        method: "GET",
+        query: {
+          select: "id",
+          player_id: `eq.${sibling.id}`,
+          status: "eq.approved",
+          limit: "1",
+        },
+        cache: "no-store",
+      }),
+    ]);
+
+    const redditMentionRows = redditMentionResponse.ok
+      ? ((await redditMentionResponse.json()) as Array<{ id: string }>)
+      : [];
+    const approvedUserReviewRows = approvedUserReviewResponse.ok
+      ? ((await approvedUserReviewResponse.json()) as Array<{ id: string }>)
+      : [];
+
+    if (redditMentionRows.length > 0 || approvedUserReviewRows.length > 0) {
+      reviewedSiblings.push(sibling);
+    }
+  }
 
   // Keep this deterministic and safe: auto-adopt only when there is exactly one
   // reviewed sibling candidate.
