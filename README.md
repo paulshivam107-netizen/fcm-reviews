@@ -28,6 +28,7 @@ Set:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` (preferred for server API route)
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional fallback)
+- `ADMIN_API_TOKEN` (required for moderation API/UI access)
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
@@ -58,6 +59,9 @@ npm run dev
   - pending moderation by default
   - optional username attribution (`reddit` or `in-game`)
   - 5 submissions max per 24h per submitter fingerprint
+- Moderation console:
+  - `/admin/moderation`
+  - approve/reject pending submissions via `ADMIN_API_TOKEN`
 - Card insight panel:
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)

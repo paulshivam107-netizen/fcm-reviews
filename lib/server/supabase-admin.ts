@@ -47,3 +47,26 @@ export async function supabaseRestRequest(args: {
   });
 }
 
+export async function supabaseRpcRequest(args: {
+  endpoint: string;
+  body: Record<string, unknown>;
+}) {
+  const config = getSupabaseServerConfig();
+  if (!config) {
+    throw new Error(
+      "Missing SUPABASE_URL and one of SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    );
+  }
+
+  const { supabaseUrl, supabaseKey } = config;
+  return fetch(`${supabaseUrl}/rest/v1/rpc/${args.endpoint}`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(args.body),
+    cache: "no-store",
+  });
+}

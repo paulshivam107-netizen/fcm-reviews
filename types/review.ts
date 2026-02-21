@@ -41,3 +41,31 @@ export type PlayerReviewsApiResponse = {
     count: number;
   };
 };
+
+export type ModerationStatus = "pending" | "approved" | "rejected";
+
+export type AdminReviewQueueItem = {
+  submissionId: string;
+  playerId: string;
+  playerName: string;
+  playerOvr: number;
+  playerPosition: string;
+  sentimentScore: number;
+  playedPosition: string;
+  mentionedRankText: string | null;
+  pros: string[];
+  cons: string[];
+  note: string | null;
+  submittedUsername: string | null;
+  submittedUsernameType: SubmittedUsernameType | null;
+  status: ModerationStatus;
+  submittedAt: string;
+};
+
+export type AdminReviewQueueResponse = {
+  items: AdminReviewQueueItem[];
+  meta: {
+    status: ModerationStatus;
+    count: number;
+  };
+};
