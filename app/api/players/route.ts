@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { queryLocalMockPlayers, shouldUseLocalMockData } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
-import { PlayerRow } from "@/types/player";
+import { PlayerRow, PlayerTab } from "@/types/player";
 
 const MV_FIELDS = [
   "player_id",
@@ -11,13 +12,44 @@ const MV_FIELDS = [
   "program_promo",
   "mention_count",
   "avg_sentiment_score",
+  "top_pros",
+  "top_cons",
   "last_processed_at",
 ].join(",");
 
 const MAX_LIMIT = 60;
+const SUPABASE_REQUEST_TIMEOUT_MS = 9000;
 
 function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
+}
+
+function buildPlayersResponse(args: {
+  rows: PlayerRow[];
+  tab: PlayerTab;
+  parsed: ReturnType<typeof parsePlayerSearch>;
+  cacheControl: string;
+  dataSource: "supabase" | "local-mock" | "local-mock-fallback";
+}) {
+  const { rows, tab, parsed, cacheControl, dataSource } = args;
+
+  return NextResponse.json(
+    {
+      items: rows,
+      meta: {
+        tab,
+        query: parsed.raw,
+        requestedOvr: parsed.requestedOvr,
+        count: rows.length,
+      },
+    },
+    {
+      headers: {
+        "Cache-Control": cacheControl,
+        "X-Data-Source": dataSource,
+      },
+    }
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -26,16 +58,6 @@ export async function GET(request: NextRequest) {
   const supabaseKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json(
-      {
-        error:
-          "Missing SUPABASE_URL and one of SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY",
-      },
-      { status: 500 }
-    );
-  }
 
   const tab = parseTab(request.nextUrl.searchParams.get("tab"));
   const q = request.nextUrl.searchParams.get("q") ?? "";
@@ -47,14 +69,60 @@ export async function GET(request: NextRequest) {
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(MAX_LIMIT, limitRaw))
     : 30;
+  const allowMockFallback =
+    String(
+      process.env.USE_LOCAL_MOCK_FALLBACK ??
+        (process.env.NODE_ENV === "production" ? "false" : "true")
+    ).toLowerCase() !== "false";
+  const isOvrOnlyQuery =
+    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
+  const getMockRows = () =>
+    queryLocalMockPlayers({
+      tab,
+      parsed,
+      limit,
+      positionGroups: POSITION_GROUPS,
+    });
+
+  if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
+    return buildPlayersResponse({
+      rows: getMockRows(),
+      tab,
+      parsed,
+      cacheControl: "no-store",
+      dataSource: "local-mock",
+    });
+  }
+
+  if (!supabaseUrl || !supabaseKey) {
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        error:
+          "Missing SUPABASE_URL and one of SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      },
+      { status: 500 }
+    );
+  }
 
   const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
   url.searchParams.set("select", MV_FIELDS);
   url.searchParams.set("mention_count", "gt.0");
-  url.searchParams.set(
-    "base_position",
-    `in.(${POSITION_GROUPS[tab].join(",")})`
-  );
+  if (!isOvrOnlyQuery) {
+    url.searchParams.set(
+      "base_position",
+      `in.(${POSITION_GROUPS[tab].join(",")})`
+    );
+  }
   url.searchParams.set("order", "avg_sentiment_score.desc.nullslast,mention_count.desc,base_ovr.desc");
   url.searchParams.set("limit", String(limit));
 
@@ -69,16 +137,56 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const response = await fetch(url, {
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-    },
-    next: { revalidate: 300 },
-  });
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    SUPABASE_REQUEST_TIMEOUT_MS
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+      signal: timeoutController.signal,
+    });
+  } catch (error) {
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        error: "Supabase request failed",
+        details: error instanceof Error ? error.message : "Unknown fetch error",
+      },
+      { status: 500 }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
     return NextResponse.json(
       { error: "Supabase query failed", details: errorText.slice(0, 500) },
       { status: 500 }
@@ -87,20 +195,11 @@ export async function GET(request: NextRequest) {
 
   const rows = (await response.json()) as PlayerRow[];
 
-  return NextResponse.json(
-    {
-      items: rows,
-      meta: {
-        tab,
-        query: parsed.raw,
-        requestedOvr: parsed.requestedOvr,
-        count: rows.length,
-      },
-    },
-    {
-      headers: {
-        "Cache-Control": "s-maxage=300, stale-while-revalidate=3600",
-      },
-    }
-  );
+  return buildPlayersResponse({
+    rows,
+    tab,
+    parsed,
+    cacheControl: "s-maxage=300, stale-while-revalidate=3600",
+    dataSource: "supabase",
+  });
 }

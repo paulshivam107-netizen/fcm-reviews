@@ -1,5 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  LOCAL_MOCK_PLAYERS,
+  LOCAL_MOCK_REVIEW_SEEDS,
+  shouldUseLocalMockData,
+} from "@/lib/local-mock-data";
 import {
   ReviewSubmissionRequest,
   ReviewSubmissionResponse,
@@ -11,6 +16,19 @@ const MAX_PROS = 3;
 const MAX_CONS = 2;
 const MAX_SUBMISSIONS_PER_24H = 5;
 const MAX_USERNAME_LENGTH = 32;
+
+type LocalSubmission = {
+  id: string;
+  player_id: string;
+  submission_fingerprint: string;
+  submitted_at: string;
+  status: "pending" | "approved";
+};
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __fcmLocalReviewSubmissions: LocalSubmission[] | undefined;
+}
 
 const COMMON_POSITIONS = new Set([
   "ST",
@@ -213,6 +231,22 @@ function isUuidLike(value: string) {
   );
 }
 
+function getLocalSubmissionStore(): LocalSubmission[] {
+  if (globalThis.__fcmLocalReviewSubmissions) {
+    return globalThis.__fcmLocalReviewSubmissions;
+  }
+
+  globalThis.__fcmLocalReviewSubmissions = LOCAL_MOCK_REVIEW_SEEDS.map((seed) => ({
+    id: seed.id,
+    player_id: seed.player_id,
+    submission_fingerprint: "seed",
+    submitted_at: seed.submitted_at,
+    status: seed.status,
+  }));
+
+  return globalThis.__fcmLocalReviewSubmissions;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as ReviewSubmissionRequest;
@@ -290,6 +324,61 @@ export async function POST(request: NextRequest) {
 
     const { ip, userAgent, fingerprint } = getClientIdentity(request);
     const throttleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const useLocalMockData = shouldUseLocalMockData(supabaseUrl, supabaseKey);
+    const autoApprove =
+      String(process.env.REVIEW_AUTO_APPROVE ?? "false").toLowerCase() === "true";
+    const status: "approved" | "pending" = autoApprove ? "approved" : "pending";
+
+    if (useLocalMockData) {
+      const store = getLocalSubmissionStore();
+      const recentCount = store.filter(
+        (row) =>
+          row.submission_fingerprint === fingerprint &&
+          row.submitted_at >= throttleCutoff
+      ).length;
+
+      if (recentCount >= MAX_SUBMISSIONS_PER_24H) {
+        return NextResponse.json(
+          {
+            error: `Submission limit reached. You can submit up to ${MAX_SUBMISSIONS_PER_24H} reviews in 24 hours.`,
+          },
+          { status: 429 }
+        );
+      }
+
+      const playerExists = LOCAL_MOCK_PLAYERS.some(
+        (player) => player.player_id === playerId
+      );
+      if (!playerExists) {
+        return NextResponse.json({ error: "Player not found" }, { status: 404 });
+      }
+
+      const submissionId = randomUUID();
+      store.push({
+        id: submissionId,
+        player_id: playerId,
+        submission_fingerprint: fingerprint,
+        submitted_at: new Date().toISOString(),
+        status,
+      });
+
+      const response: ReviewSubmissionResponse = {
+        success: true,
+        status,
+        submissionId,
+        refreshed: false,
+        message:
+          status === "approved"
+            ? "Review submitted successfully."
+            : "Review submitted and pending moderation.",
+      };
+
+      return NextResponse.json(response, { status: 201 });
+    }
 
     const existingResponse = await supabaseRest("user_review_submissions", {
       method: "GET",
@@ -342,10 +431,6 @@ export async function POST(request: NextRequest) {
     if (!players.length) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
-
-    const autoApprove =
-      String(process.env.REVIEW_AUTO_APPROVE ?? "false").toLowerCase() === "true";
-    const status = autoApprove ? "approved" : "pending";
 
     const insertResponse = await supabaseRest("user_review_submissions", {
       method: "POST",

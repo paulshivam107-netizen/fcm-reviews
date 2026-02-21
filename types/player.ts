@@ -1,5 +1,10 @@
 export type PlayerTab = "attacker" | "midfielder" | "defender" | "goalkeeper";
 
+export type PlayerInsightTerm = {
+  text: string;
+  count: number;
+};
+
 export type PlayerRow = {
   player_id: string;
   player_name: string;
@@ -8,6 +13,8 @@ export type PlayerRow = {
   program_promo: string;
   mention_count: number;
   avg_sentiment_score: number | null;
+  top_pros?: PlayerInsightTerm[];
+  top_cons?: PlayerInsightTerm[];
   last_processed_at: string | null;
 };
 
