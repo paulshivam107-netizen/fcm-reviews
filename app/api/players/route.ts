@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
     : 30;
   const allowMockFallback =
     process.env.NODE_ENV !== "production" &&
-    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "true").toLowerCase() !== "false";
+    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "false").toLowerCase() === "true";
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const hasSearchQuery = parsed.raw.trim().length > 0;
