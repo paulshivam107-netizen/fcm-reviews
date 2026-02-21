@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AdminReviewQueueItem,
   AdminReviewQueueResponse,
@@ -346,6 +347,18 @@ export default function AdminModerationPage() {
             </button>
           </section>
 
+          <nav className="mb-4 flex gap-2" aria-label="Admin tools">
+            <span className="rounded-full bg-accent-500 px-4 py-2 text-sm font-semibold text-slate-950">
+              Moderation
+            </span>
+            <Link
+              href="/admin/players"
+              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+            >
+              Players
+            </Link>
+          </nav>
+
           <nav
             className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
             aria-label="Moderation status tabs"
@@ -515,4 +528,3 @@ export default function AdminModerationPage() {
     </main>
   );
 }
-

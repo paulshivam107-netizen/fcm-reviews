@@ -1,7 +1,9 @@
 export type SubmittedUsernameType = "reddit" | "game";
 
 export type ReviewSubmissionRequest = {
-  playerId: string;
+  playerName: string;
+  playerOvr: number;
+  eventName?: string | null;
   sentimentScore: number;
   playedPosition: string;
   mentionedRankText?: string | null;

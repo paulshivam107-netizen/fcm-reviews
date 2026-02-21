@@ -28,6 +28,9 @@ import {
 type FetchState = "idle" | "loading" | "success" | "error";
 
 type ReviewFormState = {
+  playerName: string;
+  playerOvr: string;
+  eventName: string;
   sentimentScore: number;
   playedPosition: string;
   mentionedRankText: string;
@@ -126,10 +129,20 @@ function queryClientMockPlayers(tab: PlayerTab, query: string, limit = 30) {
   return rows.slice(0, limit);
 }
 
-function buildInitialReviewForm(player: PlayerRow): ReviewFormState {
+function buildInitialReviewForm(
+  defaultPosition = "ST",
+  prefill?: {
+    playerName?: string;
+    playerOvr?: string;
+    eventName?: string;
+  }
+): ReviewFormState {
   return {
+    playerName: prefill?.playerName ?? "",
+    playerOvr: prefill?.playerOvr ?? "",
+    eventName: prefill?.eventName ?? "",
     sentimentScore: 8,
-    playedPosition: player.base_position,
+    playedPosition: defaultPosition,
     mentionedRankText: "",
     pros: [],
     cons: [],
@@ -609,7 +622,7 @@ export default function HomePage() {
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
     []
   );
-  const reviewPlayerOptions = rows.length ? rows : LOCAL_MOCK_PLAYERS;
+  const isReviewPanelOpen = reviewForm !== null;
 
   useEffect(() => {
     setIsHydrated(true);
@@ -753,7 +766,13 @@ export default function HomePage() {
 
   const onSelectPlayerForReview = (player: PlayerRow) => {
     setSelectedPlayer(player);
-    setReviewForm(buildInitialReviewForm(player));
+    setReviewForm(
+      buildInitialReviewForm(player.base_position, {
+        playerName: player.player_name,
+        playerOvr: String(player.base_ovr),
+        eventName: player.program_promo,
+      })
+    );
     setReviewFeedback(null);
     setCaptchaToken("");
     setCaptchaRenderKey((current) => current + 1);
@@ -782,17 +801,23 @@ export default function HomePage() {
   };
 
   const onOpenGlobalAddReview = () => {
-    onSelectPlayerForReview(
-      selectedPlayer ?? selectedInsightPlayer ?? reviewPlayerOptions[0]
+    const preferredPlayer = selectedInsightPlayer ?? null;
+    setSelectedPlayer(preferredPlayer);
+    setReviewForm(
+      buildInitialReviewForm(
+        preferredPlayer?.base_position ?? "ST",
+        preferredPlayer
+          ? {
+              playerName: preferredPlayer.player_name,
+              playerOvr: String(preferredPlayer.base_ovr),
+              eventName: preferredPlayer.program_promo,
+            }
+          : undefined
+      )
     );
-  };
-
-  const onChangeReviewPlayer = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextPlayer = reviewPlayerOptions.find(
-      (row) => row.player_id === event.target.value
-    );
-    if (!nextPlayer) return;
-    onSelectPlayerForReview(nextPlayer);
+    setReviewFeedback(null);
+    setCaptchaToken("");
+    setCaptchaRenderKey((current) => current + 1);
   };
 
   const closeReviewPanel = () => {
@@ -823,6 +848,14 @@ export default function HomePage() {
         setReviewForm({
           ...reviewForm,
           playedPosition: normalizePositionInput(nextValue),
+        });
+        return;
+      }
+
+      if (field === "playerOvr") {
+        setReviewForm({
+          ...reviewForm,
+          playerOvr: nextValue.replace(/[^0-9]/g, "").slice(0, 3),
         });
         return;
       }
@@ -858,7 +891,25 @@ export default function HomePage() {
   const onSubmitReview = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!selectedPlayer || !reviewForm || isSubmittingReview) {
+    if (!reviewForm || isSubmittingReview) {
+      return;
+    }
+
+    const playerName = reviewForm.playerName.trim();
+    if (playerName.length < 2) {
+      setReviewFeedback({
+        kind: "error",
+        message: "Enter player name (minimum 2 characters).",
+      });
+      return;
+    }
+
+    const playerOvr = Number(reviewForm.playerOvr);
+    if (!Number.isInteger(playerOvr) || playerOvr < 1 || playerOvr > 130) {
+      setReviewFeedback({
+        kind: "error",
+        message: "Enter a valid OVR between 1 and 130.",
+      });
       return;
     }
 
@@ -904,7 +955,9 @@ export default function HomePage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          playerId: selectedPlayer.player_id,
+          playerName,
+          playerOvr,
+          eventName: reviewForm.eventName.trim() || null,
           sentimentScore: reviewForm.sentimentScore,
           playedPosition: reviewForm.playedPosition,
           mentionedRankText: reviewForm.mentionedRankText || null,
@@ -935,7 +988,18 @@ export default function HomePage() {
         kind: "success",
         message: payload.message ?? "Review submitted and pending moderation.",
       });
-      setReviewForm(buildInitialReviewForm(selectedPlayer));
+      setReviewForm(
+        buildInitialReviewForm(
+          selectedPlayer?.base_position ?? "ST",
+          selectedPlayer
+            ? {
+                playerName: selectedPlayer.player_name,
+                playerOvr: String(selectedPlayer.base_ovr),
+                eventName: selectedPlayer.program_promo,
+              }
+            : undefined
+        )
+      );
       setCaptchaToken("");
       setCaptchaRenderKey((current) => current + 1);
     } catch {
@@ -980,7 +1044,7 @@ export default function HomePage() {
             Add Review
           </button>
           <p className="text-xs text-slate-400">
-            Don&apos;t see your player? search first, then submit.
+            Submit for any player card using name + OVR.
           </p>
         </div>
       </header>
@@ -1030,7 +1094,7 @@ export default function HomePage() {
         })}
       </nav>
 
-      <section className="space-y-3">
+      {!isReviewPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}
 
         {state === "error" && (
@@ -1069,20 +1133,24 @@ export default function HomePage() {
               )}
             </div>
           ))}
-      </section>
+      </section>}
 
-      {selectedPlayer && reviewForm && (
-        <section className="glass-panel mt-6 rounded-2xl p-4">
+      {reviewForm && (
+        <section className="glass-panel mb-6 rounded-2xl p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.12em] text-lime-200">
                 Submit Review
               </p>
               <h2 className="mt-1 text-lg font-semibold text-slate-100">
-                {selectedPlayer.player_name} · {selectedPlayer.base_ovr}
+                {selectedPlayer
+                  ? `Prefilled: ${selectedPlayer.player_name} · ${selectedPlayer.base_ovr}`
+                  : "Any FC Mobile Card"}
               </h2>
               <p className="text-xs text-slate-300">
-                Reviews are published after moderation.
+                {selectedPlayer
+                  ? "Edit the fields if you want to submit for a different card."
+                  : "Enter player name + OVR. Event is optional."}
               </p>
             </div>
             <button
@@ -1095,23 +1163,42 @@ export default function HomePage() {
           </div>
 
           <form onSubmit={onSubmitReview} className="relative space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <label className="col-span-2 text-xs text-slate-300">
+                Player Name
+                <input
+                  type="text"
+                  value={reviewForm.playerName}
+                  onChange={onChangeReviewField("playerName")}
+                  maxLength={72}
+                  placeholder="e.g. Lionel Messi"
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                />
+              </label>
+
+              <label className="text-xs text-slate-300">
+                OVR
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={reviewForm.playerOvr}
+                  onChange={onChangeReviewField("playerOvr")}
+                  placeholder="113"
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                />
+              </label>
+            </div>
+
             <label className="block text-xs text-slate-300">
-              Player
-              <select
-                value={selectedPlayer.player_id}
-                onChange={onChangeReviewPlayer}
+              Event (optional)
+              <input
+                type="text"
+                value={reviewForm.eventName}
+                onChange={onChangeReviewField("eventName")}
+                maxLength={48}
+                placeholder="e.g. TOTY, Icons, Signature"
                 className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-              >
-                {reviewPlayerOptions.map((row) => (
-                  <option
-                    key={row.player_id}
-                    value={row.player_id}
-                    className="bg-slate-900 text-slate-100"
-                  >
-                    {row.player_name} · {row.base_ovr} · {row.base_position}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
 
             <div className="grid grid-cols-2 gap-3">

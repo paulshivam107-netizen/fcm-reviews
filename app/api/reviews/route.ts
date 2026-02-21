@@ -18,12 +18,18 @@ const MAX_CONS = 2;
 const MAX_SUBMISSIONS_PER_24H = 5;
 const MAX_USERNAME_LENGTH = 32;
 const DUPLICATE_LOOKBACK_HOURS = 72;
+const MAX_PLAYER_NAME_LENGTH = 72;
+const MAX_EVENT_NAME_LENGTH = 48;
+const MIN_OVR = 1;
+const MAX_OVR = 130;
+const FALLBACK_PROGRAM_PROMO = "Community";
 const CAPTCHA_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 type LocalSubmission = {
   id: string;
   player_id: string;
+  player_key: string;
   submission_fingerprint: string;
   submitted_at: string;
   status: "pending" | "approved";
@@ -105,6 +111,16 @@ function normalizeUsername(value: string | null | undefined) {
 
   if (!trimmed) return null;
   return trimmed.slice(0, MAX_USERNAME_LENGTH);
+}
+
+function normalizeFreeText(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeLookupKey(value: string | null | undefined) {
+  return normalizeFreeText(value).toLowerCase();
 }
 
 function normalizeUsernameType(
@@ -324,12 +340,6 @@ function getClientIdentity(request: NextRequest) {
   return { ip, userAgent, fingerprint };
 }
 
-function isUuidLike(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value
-  );
-}
-
 function getLocalSubmissionStore(): LocalSubmission[] {
   if (globalThis.__fcmLocalReviewSubmissions) {
     return globalThis.__fcmLocalReviewSubmissions;
@@ -338,6 +348,7 @@ function getLocalSubmissionStore(): LocalSubmission[] {
   globalThis.__fcmLocalReviewSubmissions = LOCAL_MOCK_REVIEW_SEEDS.map((seed) => ({
     id: seed.id,
     player_id: seed.player_id,
+    player_key: `id:${seed.player_id}`,
     submission_fingerprint: "seed",
     submitted_at: seed.submitted_at,
     status: seed.status,
@@ -364,10 +375,33 @@ export async function POST(request: NextRequest) {
 
     const captchaToken = String(payload.captchaToken ?? "").trim();
 
-    const playerId = String(payload.playerId ?? "").trim();
-    if (!isUuidLike(playerId)) {
-      return NextResponse.json({ error: "Invalid playerId" }, { status: 400 });
+    const playerName = normalizeFreeText(payload.playerName).slice(
+      0,
+      MAX_PLAYER_NAME_LENGTH
+    );
+    if (playerName.length < 2) {
+      return NextResponse.json(
+        { error: "playerName must be at least 2 characters" },
+        { status: 400 }
+      );
     }
+
+    const playerOvr = Number(payload.playerOvr);
+    if (
+      !Number.isInteger(playerOvr) ||
+      playerOvr < MIN_OVR ||
+      playerOvr > MAX_OVR
+    ) {
+      return NextResponse.json(
+        { error: `playerOvr must be an integer between ${MIN_OVR} and ${MAX_OVR}` },
+        { status: 400 }
+      );
+    }
+
+    const eventName =
+      normalizeFreeText(payload.eventName).slice(0, MAX_EVENT_NAME_LENGTH) || null;
+    const playerNameLookupKey = normalizeLookupKey(playerName);
+    const eventNameLookupKey = eventName ? normalizeLookupKey(eventName) : null;
 
     const sentimentScore = Number(payload.sentimentScore);
     if (
@@ -484,15 +518,23 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const playerExists = LOCAL_MOCK_PLAYERS.some(
-        (player) => player.player_id === playerId
+      const localPlayer = LOCAL_MOCK_PLAYERS.find(
+        (player) =>
+          normalizeLookupKey(player.player_name) === playerNameLookupKey &&
+          player.base_ovr === playerOvr &&
+          (!eventNameLookupKey ||
+            normalizeLookupKey(player.program_promo) === eventNameLookupKey)
       );
-      if (!playerExists) {
-        return NextResponse.json({ error: "Player not found" }, { status: 404 });
-      }
+      const localPlayerKey =
+        localPlayer?.player_id ??
+        `${playerNameLookupKey}|${playerOvr}|${eventNameLookupKey ?? ""}`;
+      const localPlayerId =
+        localPlayer?.player_id ??
+        `local-${createHash("sha256").update(localPlayerKey).digest("hex").slice(0, 16)}`;
 
       const recentPlayerNotes = store.filter(
-        (row) => row.player_id === playerId && row.submitted_at >= duplicateCutoff
+        (row) =>
+          row.player_key === localPlayerKey && row.submitted_at >= duplicateCutoff
       );
       const hasNearDuplicate = recentPlayerNotes.some((row) =>
         isNearDuplicateNote(note, row.note)
@@ -510,7 +552,8 @@ export async function POST(request: NextRequest) {
       const submissionId = randomUUID();
       store.push({
         id: submissionId,
-        player_id: playerId,
+        player_id: localPlayerId,
+        player_key: localPlayerKey,
         submission_fingerprint: fingerprint,
         submitted_at: new Date().toISOString(),
         status,
@@ -530,7 +573,7 @@ export async function POST(request: NextRequest) {
 
       await trackAppEvent({
         eventType: "review_submitted",
-        playerId,
+        playerId: localPlayerId,
         metadata: { source: "local-mock", status },
         request,
       });
@@ -567,11 +610,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const playerResponse = await supabaseRest("players", {
+      method: "GET",
+      query: {
+        select: "id,player_name,base_ovr,program_promo",
+        player_name: `ilike.${playerName}`,
+        base_ovr: `eq.${playerOvr}`,
+        is_active: "eq.true",
+        order: "created_at.desc",
+        limit: "30",
+      },
+    });
+
+    if (!playerResponse.ok) {
+      const details = await playerResponse.text();
+      return NextResponse.json(
+        { error: "Player lookup failed", details: details.slice(0, 500) },
+        { status: 500 }
+      );
+    }
+
+    const candidatePlayers = (await playerResponse.json()) as Array<{
+      id: string;
+      player_name: string;
+      base_ovr: number;
+      program_promo: string;
+    }>;
+
+    const exactNameMatches = candidatePlayers.filter(
+      (row) =>
+        normalizeLookupKey(row.player_name) === playerNameLookupKey &&
+        row.base_ovr === playerOvr
+    );
+
+    let resolvedPlayerId =
+      (eventNameLookupKey
+        ? exactNameMatches.find(
+            (row) => normalizeLookupKey(row.program_promo) === eventNameLookupKey
+          )
+        : exactNameMatches[0])?.id ?? null;
+
+    if (!resolvedPlayerId) {
+      const createPlayerResponse = await supabaseRest("players", {
+        method: "POST",
+        body: [
+          {
+            player_name: playerName,
+            base_ovr: playerOvr,
+            base_position: playedPosition,
+            program_promo: eventName ?? FALLBACK_PROGRAM_PROMO,
+            is_active: true,
+          },
+        ],
+      });
+
+      if (!createPlayerResponse.ok) {
+        const details = await createPlayerResponse.text();
+        return NextResponse.json(
+          { error: "Failed to create player", details: details.slice(0, 500) },
+          { status: 500 }
+        );
+      }
+
+      const created = (await createPlayerResponse.json()) as Array<{ id: string }>;
+      resolvedPlayerId = created[0]?.id ?? null;
+    }
+
+    if (!resolvedPlayerId) {
+      return NextResponse.json(
+        { error: "Unable to resolve player for this review." },
+        { status: 500 }
+      );
+    }
+
     const duplicateResponse = await supabaseRest("user_review_submissions", {
       method: "GET",
       query: {
         select: "note",
-        player_id: `eq.${playerId}`,
+        player_id: `eq.${resolvedPlayerId}`,
         submitted_at: `gte.${duplicateCutoff}`,
         note: "not.is.null",
         order: "submitted_at.desc",
@@ -601,34 +717,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const playerResponse = await supabaseRest("players", {
-      method: "GET",
-      query: {
-        select: "id",
-        id: `eq.${playerId}`,
-        is_active: "eq.true",
-        limit: "1",
-      },
-    });
-
-    if (!playerResponse.ok) {
-      const details = await playerResponse.text();
-      return NextResponse.json(
-        { error: "Player lookup failed", details: details.slice(0, 500) },
-        { status: 500 }
-      );
-    }
-
-    const players = (await playerResponse.json()) as Array<{ id: string }>;
-    if (!players.length) {
-      return NextResponse.json({ error: "Player not found" }, { status: 404 });
-    }
-
     const insertResponse = await supabaseRest("user_review_submissions", {
       method: "POST",
       body: [
         {
-          player_id: playerId,
+          player_id: resolvedPlayerId,
           source_platform: "user",
           submission_fingerprint: fingerprint,
           submitted_from_ip: ip === "unknown" ? null : ip,
@@ -693,7 +786,7 @@ export async function POST(request: NextRequest) {
 
     await trackAppEvent({
       eventType: "review_submitted",
-      playerId,
+      playerId: resolvedPlayerId,
       metadata: { source: "supabase", status: resolvedStatus, refreshed },
       request,
     });
