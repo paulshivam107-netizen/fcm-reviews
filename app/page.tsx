@@ -35,7 +35,7 @@ type ReviewFormState = {
   playerName: string;
   playerOvr: string;
   eventName: string;
-  sentimentScore: number;
+  sentimentScore: string;
   playedPosition: string;
   mentionedRankText: string;
   pros: string[];
@@ -101,13 +101,14 @@ function normalizeInsightTerms(terms: PlayerInsightTerm[] | undefined) {
 
 function queryClientMockPlayers(tab: PlayerTab, query: string, limit = 30) {
   const parsed = parsePlayerSearch(query);
+  const hasQuery = parsed.raw.trim().length > 0;
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const allowedPositions = new Set(POSITION_GROUPS[tab]);
   const queryText = parsed.nameQuery.trim().toLowerCase();
 
   let rows = LOCAL_MOCK_PLAYERS;
-  if (!isOvrOnlyQuery) {
+  if (!hasQuery && !isOvrOnlyQuery) {
     rows = rows.filter((row) => allowedPositions.has(row.base_position));
   }
   if (parsed.requestedOvr !== null) {
@@ -140,7 +141,7 @@ function buildInitialReviewForm(
     playerName: prefill?.playerName ?? "",
     playerOvr: prefill?.playerOvr ?? "",
     eventName: prefill?.eventName ?? "",
-    sentimentScore: 8,
+    sentimentScore: "8",
     playedPosition: defaultPosition,
     mentionedRankText: "",
     pros: [],
@@ -846,12 +847,10 @@ export default function HomePage() {
 
       const nextValue = event.target.value;
       if (field === "sentimentScore") {
-        const parsed = Number(nextValue);
+        const sanitized = nextValue.replace(/[^0-9]/g, "").slice(0, 2);
         setReviewForm({
           ...reviewForm,
-          sentimentScore: Number.isFinite(parsed)
-            ? Math.max(1, Math.min(10, Math.round(parsed)))
-            : reviewForm.sentimentScore,
+          sentimentScore: sanitized,
         });
         return;
       }
@@ -930,6 +929,15 @@ export default function HomePage() {
       return;
     }
 
+    const sentimentScore = Number.parseInt(reviewForm.sentimentScore, 10);
+    if (!Number.isInteger(sentimentScore) || sentimentScore < 1 || sentimentScore > 10) {
+      setReviewFeedback({
+        kind: "error",
+        message: "Enter integer sentiment between 1 and 10.",
+      });
+      return;
+    }
+
     if (reviewForm.submittedUsername && !reviewForm.submittedUsernameType) {
       setReviewFeedback({
         kind: "error",
@@ -975,7 +983,7 @@ export default function HomePage() {
           playerName,
           playerOvr,
           eventName: reviewForm.eventName.trim() || null,
-          sentimentScore: reviewForm.sentimentScore,
+          sentimentScore,
           playedPosition: reviewForm.playedPosition,
           mentionedRankText: reviewForm.mentionedRankText || null,
           pros: reviewForm.pros,
@@ -1222,10 +1230,10 @@ export default function HomePage() {
               <label className="text-xs text-slate-300">
                 Sentiment (1-10)
                 <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  step={1}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="1-10"
                   value={reviewForm.sentimentScore}
                   onChange={onChangeReviewField("sentimentScore")}
                   className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
