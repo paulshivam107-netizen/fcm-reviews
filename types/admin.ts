@@ -32,3 +32,11 @@ export type AdminArchiveStaleResponse = {
   days: number;
   refreshed: boolean;
 };
+
+export type AdminManualReviewResponse = {
+  success: boolean;
+  submissionId: string;
+  playerId: string;
+  refreshed: boolean;
+  message: string;
+};

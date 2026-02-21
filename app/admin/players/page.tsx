@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { getReviewTagsForPosition } from "@/lib/review-attributes";
 import {
   AdminArchiveStaleResponse,
+  AdminManualReviewResponse,
   AdminPlayerItem,
   AdminPlayerMutationResponse,
   AdminPlayersListResponse,
@@ -20,6 +22,35 @@ type EditDraft = {
   programPromo: string;
   isActive: boolean;
 };
+
+type ManualReviewField = "pros" | "cons";
+type ManualReviewDraft = {
+  playerName: string;
+  playerOvr: string;
+  eventName: string;
+  playedPosition: string;
+  sentimentScore: string;
+  mentionedRankText: string;
+  pros: string[];
+  cons: string[];
+  note: string;
+};
+
+const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
+
+function buildInitialManualReviewDraft(): ManualReviewDraft {
+  return {
+    playerName: "",
+    playerOvr: "",
+    eventName: "",
+    playedPosition: "ST",
+    sentimentScore: "8",
+    mentionedRankText: "",
+    pros: [],
+    cons: [],
+    note: "",
+  };
+}
 
 function formatWhen(value: string) {
   const date = new Date(value);
@@ -41,6 +72,11 @@ function normalizePositionInput(value: string) {
   return value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
 }
 
+function filterTagsForPosition(tags: string[], position: string) {
+  const allowed = new Set(getReviewTagsForPosition(position));
+  return tags.filter((tag) => allowed.has(tag));
+}
+
 export default function AdminPlayersPage() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
@@ -60,6 +96,10 @@ export default function AdminPlayersPage() {
   const [actionById, setActionById] = useState<Record<string, RowActionState>>({});
   const [archiveDays, setArchiveDays] = useState("30");
   const [isArchiving, setIsArchiving] = useState(false);
+  const [manualReview, setManualReview] = useState<ManualReviewDraft>(() =>
+    buildInitialManualReviewDraft()
+  );
+  const [isSubmittingManualReview, setIsSubmittingManualReview] = useState(false);
 
   const loadPlayers = useCallback(async () => {
     if (authState !== "authenticated") {
@@ -151,6 +191,10 @@ export default function AdminPlayersPage() {
   }, [loadPlayers]);
 
   const pendingEdits = useMemo(() => Object.keys(editById).length, [editById]);
+  const manualTagOptions = useMemo(
+    () => getReviewTagsForPosition(manualReview.playedPosition),
+    [manualReview.playedPosition]
+  );
 
   const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -207,6 +251,117 @@ export default function AdminPlayersPage() {
       setError(null);
       setEditById({});
       setActionById({});
+      setManualReview(buildInitialManualReviewDraft());
+      setIsSubmittingManualReview(false);
+    }
+  };
+
+  const updateManualReview = (patch: Partial<ManualReviewDraft>) => {
+    setManualReview((current) => ({ ...current, ...patch }));
+  };
+
+  const toggleManualTag = (field: ManualReviewField, tag: string) => {
+    setManualReview((current) => {
+      const allowed = new Set(getReviewTagsForPosition(current.playedPosition));
+      if (!allowed.has(tag)) return current;
+
+      const list = current[field];
+      const exists = list.includes(tag);
+      const max = field === "pros" ? 3 : 2;
+      if (exists) {
+        return {
+          ...current,
+          [field]: list.filter((item) => item !== tag),
+        };
+      }
+      if (list.length >= max) {
+        return current;
+      }
+      return {
+        ...current,
+        [field]: [...list, tag],
+      };
+    });
+  };
+
+  const submitManualReview = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const playerName = manualReview.playerName.trim();
+    if (playerName.length < 2) {
+      setError("Player name must be at least 2 characters.");
+      return;
+    }
+
+    const playerOvr = Number(manualReview.playerOvr);
+    if (!Number.isInteger(playerOvr) || playerOvr < 1 || playerOvr > 130) {
+      setError("OVR must be an integer between 1 and 130.");
+      return;
+    }
+
+    const playedPosition = normalizePositionInput(manualReview.playedPosition);
+    if (playedPosition.length < 2) {
+      setError("Played position is required (example: ST, CAM, RB).");
+      return;
+    }
+
+    const sentimentScore = Number(manualReview.sentimentScore);
+    if (!Number.isFinite(sentimentScore) || sentimentScore < 1 || sentimentScore > 10) {
+      setError("Sentiment score must be between 1 and 10.");
+      return;
+    }
+
+    setIsSubmittingManualReview(true);
+    setError(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/admin/reviews/manual", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          playerName,
+          playerOvr,
+          eventName: manualReview.eventName.trim() || null,
+          sentimentScore,
+          playedPosition,
+          mentionedRankText: manualReview.mentionedRankText || null,
+          pros: manualReview.pros,
+          cons: manualReview.cons,
+          note: manualReview.note.trim() || null,
+        }),
+      });
+
+      const payload = (await response.json()) as
+        | AdminManualReviewResponse
+        | { error?: string };
+      if (!response.ok) {
+        if (response.status === 401) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+          throw new Error("Session expired. Please sign in again.");
+        }
+        const message =
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const successPayload = payload as AdminManualReviewResponse;
+      setFeedback(successPayload.message);
+      setManualReview(buildInitialManualReviewDraft());
+      await loadPlayers();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Failed to submit admin review."
+      );
+    } finally {
+      setIsSubmittingManualReview(false);
     }
   };
 
@@ -271,11 +426,6 @@ export default function AdminPlayersPage() {
       return;
     }
 
-    if (!draft.programPromo.trim()) {
-      setError("Event/Program is required.");
-      return;
-    }
-
     setActionById((current) => ({ ...current, [playerId]: "saving" }));
     setError(null);
     setFeedback(null);
@@ -291,7 +441,7 @@ export default function AdminPlayersPage() {
           playerName: trimmedName,
           baseOvr,
           basePosition: normalizePositionInput(draft.basePosition),
-          programPromo: draft.programPromo.trim(),
+          programPromo: draft.programPromo.trim() || null,
           isActive: draft.isActive,
         }),
       });
@@ -506,6 +656,179 @@ export default function AdminPlayersPage() {
           </nav>
 
           <section className="glass-panel mb-5 rounded-2xl p-4">
+            <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">
+              Publish Admin Review
+            </p>
+            <p className="mb-3 text-xs text-slate-400">
+              Add a review as admin. It is saved as approved and reflected in card sentiment
+              after refresh.
+            </p>
+            <form onSubmit={submitManualReview} className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <label className="col-span-2 text-xs text-slate-300">
+                  Player Name
+                  <input
+                    type="text"
+                    value={manualReview.playerName}
+                    onChange={(event) =>
+                      updateManualReview({ playerName: event.target.value })
+                    }
+                    maxLength={72}
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+                <label className="text-xs text-slate-300">
+                  OVR
+                  <input
+                    type="number"
+                    min={1}
+                    max={130}
+                    value={manualReview.playerOvr}
+                    onChange={(event) =>
+                      updateManualReview({ playerOvr: event.target.value })
+                    }
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-300">
+                  Event/Program (optional)
+                  <input
+                    type="text"
+                    value={manualReview.eventName}
+                    onChange={(event) =>
+                      updateManualReview({ eventName: event.target.value })
+                    }
+                    maxLength={48}
+                    placeholder="Leave blank to use Community"
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+                <label className="text-xs text-slate-300">
+                  Played Position
+                  <input
+                    type="text"
+                    value={manualReview.playedPosition}
+                    onChange={(event) => {
+                      const nextPosition = normalizePositionInput(event.target.value);
+                      setManualReview((current) => ({
+                        ...current,
+                        playedPosition: nextPosition,
+                        pros: filterTagsForPosition(current.pros, nextPosition),
+                        cons: filterTagsForPosition(current.cons, nextPosition),
+                      }));
+                    }}
+                    maxLength={4}
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm uppercase text-slate-100 outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-300">
+                  Sentiment (1-10)
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    step={0.1}
+                    value={manualReview.sentimentScore}
+                    onChange={(event) =>
+                      updateManualReview({ sentimentScore: event.target.value })
+                    }
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+                <label className="text-xs text-slate-300">
+                  Mentioned Rank
+                  <select
+                    value={manualReview.mentionedRankText}
+                    onChange={(event) =>
+                      updateManualReview({ mentionedRankText: event.target.value })
+                    }
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  >
+                    {RANK_OPTIONS.map((option) => (
+                      <option key={option || "none"} value={option}>
+                        {option || "Not mentioned"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs text-slate-300">Pros tags (max 3)</p>
+                <div className="flex flex-wrap gap-2">
+                  {manualTagOptions.map((tag) => {
+                    const active = manualReview.pros.includes(tag);
+                    return (
+                      <button
+                        key={`pro-${tag}`}
+                        type="button"
+                        onClick={() => toggleManualTag("pros", tag)}
+                        className={[
+                          "rounded-full border px-3 py-1 text-xs transition",
+                          active
+                            ? "border-lime-300/45 bg-lime-300/20 text-lime-100"
+                            : "border-white/20 bg-white/5 text-slate-300 hover:bg-white/10",
+                        ].join(" ")}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs text-slate-300">Cons tags (max 2)</p>
+                <div className="flex flex-wrap gap-2">
+                  {manualTagOptions.map((tag) => {
+                    const active = manualReview.cons.includes(tag);
+                    return (
+                      <button
+                        key={`con-${tag}`}
+                        type="button"
+                        onClick={() => toggleManualTag("cons", tag)}
+                        className={[
+                          "rounded-full border px-3 py-1 text-xs transition",
+                          active
+                            ? "border-rose-300/45 bg-rose-300/20 text-rose-100"
+                            : "border-white/20 bg-white/5 text-slate-300 hover:bg-white/10",
+                        ].join(" ")}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <label className="block text-xs text-slate-300">
+                Review note (optional)
+                <textarea
+                  rows={3}
+                  value={manualReview.note}
+                  onChange={(event) => updateManualReview({ note: event.target.value })}
+                  maxLength={220}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={isSubmittingManualReview}
+                className="w-full rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSubmittingManualReview ? "Publishing..." : "Publish Review"}
+              </button>
+            </form>
+          </section>
+
+          <section className="glass-panel mb-5 rounded-2xl p-4">
             <p className="mb-3 text-xs uppercase tracking-[0.1em] text-slate-300">
               Auto Archive Stale Cards
             </p>
@@ -693,7 +1016,7 @@ export default function AdminPlayersPage() {
                         />
                       </label>
                       <label className="text-xs text-slate-300">
-                        Event/Program
+                        Event/Program (optional)
                         <input
                           type="text"
                           value={draft.programPromo}
@@ -701,6 +1024,7 @@ export default function AdminPlayersPage() {
                             updateDraft(row.playerId, { programPromo: event.target.value })
                           }
                           maxLength={48}
+                          placeholder="Leave blank to use Community"
                           className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
                         />
                       </label>
