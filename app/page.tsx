@@ -1087,7 +1087,7 @@ export default function HomePage() {
             type="search"
             value={queryDraft}
             onChange={(event) => setQueryDraft(event.target.value)}
-            placeholder="Search player or try “113 Messi”"
+            placeholder="Search player or try “117 Messi”"
             className="w-full bg-transparent text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none"
           />
         </div>
