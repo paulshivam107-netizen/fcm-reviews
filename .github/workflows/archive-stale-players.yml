@@ -1,0 +1,35 @@
+name: Archive Stale Players
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger stale-card archival
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_BASE_URL}" ]; then
+            echo "Missing APP_BASE_URL secret"
+            exit 1
+          fi
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "Missing CRON_SECRET secret"
+            exit 1
+          fi
+
+          curl -fsS \
+            -X POST \
+            "${APP_BASE_URL}/api/internal/maintenance/archive-stale" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --data '{"days":30}'

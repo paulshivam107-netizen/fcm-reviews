@@ -34,6 +34,7 @@ Set:
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
 - `REVIEW_CAPTCHA_REQUIRED` (`true` in production recommended)
 - `TURNSTILE_SECRET_KEY` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (Cloudflare Turnstile)
+- `CRON_SECRET` (protects internal maintenance endpoints)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 - `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
 - `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; enable UI ad placeholders when ready)
@@ -68,6 +69,11 @@ npm run dev
   - `/admin/moderation`
   - admin login via Supabase email/password
   - server-side allowlist + signed admin session cookie
+- Player admin console:
+  - `/admin/players`
+  - edit card metadata (`name`, `base OVR`, `base position`, `event/program`)
+  - soft-delete/archive cards from public listing
+  - archive stale cards (default: no update in 30 days)
 - Card insight panel:
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)
@@ -88,6 +94,16 @@ Latest review feed reads from `public.player_sentiment_mentions` and approved
 
 Basic product analytics are recorded via `POST /api/track` into
 `public.app_event_logs` (searches, card opens, submissions, moderation actions).
+
+## Automatic stale-card archival
+
+- Internal endpoint: `POST /api/internal/maintenance/archive-stale`
+- Auth: `Authorization: Bearer <CRON_SECRET>`
+- Body: `{ "days": 30 }` (optional, default `30`)
+- Scheduled workflow: `.github/workflows/archive-stale-players.yml` (daily)
+  - Set GitHub secrets:
+    - `APP_BASE_URL` (deployed base URL, no trailing slash)
+    - `CRON_SECRET` (must match runtime env var)
 
 ## Local mock mode
 
