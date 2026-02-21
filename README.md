@@ -70,6 +70,10 @@ npm run dev
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)
 - Ad-slot placeholders (top, in-feed, footer) toggleable via env flag
+- Legal pages:
+  - `/terms`
+  - `/privacy`
+  - disclaimer shown in footer
 
 ## Data contract
 

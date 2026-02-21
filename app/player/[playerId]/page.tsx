@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { LegalFooter } from "@/components/legal-footer";
 import { PlayerApiResponse, PlayerInsightTerm, PlayerRow } from "@/types/player";
 import { PlayerReviewFeedItem, PlayerReviewsApiResponse } from "@/types/review";
 
@@ -287,7 +288,8 @@ export default function PlayerDetailPage() {
           </section>
         </>
       )}
+
+      <LegalFooter />
     </main>
   );
 }
-

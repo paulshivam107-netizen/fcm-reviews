@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { LegalFooter } from "@/components/legal-footer";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
@@ -1265,6 +1266,7 @@ export default function HomePage() {
       )}
 
       <AdSlot placement="Footer Sticky (320x50)" className="mt-6" />
+      <LegalFooter />
     </main>
   );
 }
