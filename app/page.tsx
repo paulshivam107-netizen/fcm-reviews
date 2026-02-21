@@ -12,7 +12,10 @@ import Link from "next/link";
 import { LegalFooter } from "@/components/legal-footer";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
-import { getReviewTagsForPosition } from "@/lib/review-attributes";
+import {
+  getReviewTagsForPosition,
+  REVIEW_POSITIONS_BY_GROUP,
+} from "@/lib/review-attributes";
 import { parsePlayerSearch } from "@/lib/search";
 import {
   PlayerInsightTerm,
@@ -52,6 +55,12 @@ const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
 const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+const DEFAULT_REVIEW_POSITION_BY_TAB: Record<PlayerTab, string> = {
+  attacker: "ST",
+  midfielder: "CM",
+  defender: "CB",
+  goalkeeper: "GK",
+};
 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
@@ -804,10 +813,11 @@ export default function HomePage() {
 
   const onOpenGlobalAddReview = () => {
     const preferredPlayer = selectedInsightPlayer ?? null;
+    const fallbackPosition = DEFAULT_REVIEW_POSITION_BY_TAB[activeTab];
     setSelectedPlayer(preferredPlayer);
     setReviewForm(
       buildInitialReviewForm(
-        preferredPlayer?.base_position ?? "ST",
+        preferredPlayer?.base_position ?? fallbackPosition,
         preferredPlayer
           ? {
               playerName: preferredPlayer.player_name,
@@ -1224,13 +1234,56 @@ export default function HomePage() {
 
               <label className="text-xs text-slate-300">
                 Played Position
-                <input
-                  type="text"
+                <select
                   value={reviewForm.playedPosition}
                   onChange={onChangeReviewField("playedPosition")}
-                  placeholder="ST"
                   className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm uppercase text-slate-100 outline-none"
-                />
+                >
+                  <optgroup label="Attacker">
+                    {REVIEW_POSITIONS_BY_GROUP.attacker.map((position) => (
+                      <option
+                        key={position}
+                        value={position}
+                        className="bg-slate-900 text-slate-100"
+                      >
+                        {position}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Midfielder">
+                    {REVIEW_POSITIONS_BY_GROUP.midfielder.map((position) => (
+                      <option
+                        key={position}
+                        value={position}
+                        className="bg-slate-900 text-slate-100"
+                      >
+                        {position}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Defender">
+                    {REVIEW_POSITIONS_BY_GROUP.defender.map((position) => (
+                      <option
+                        key={position}
+                        value={position}
+                        className="bg-slate-900 text-slate-100"
+                      >
+                        {position}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Goalkeeper">
+                    {REVIEW_POSITIONS_BY_GROUP.goalkeeper.map((position) => (
+                      <option
+                        key={position}
+                        value={position}
+                        className="bg-slate-900 text-slate-100"
+                      >
+                        {position}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
               </label>
             </div>
 
@@ -1287,7 +1340,9 @@ export default function HomePage() {
             </label>
 
             <div>
-              <p className="mb-2 text-xs text-slate-300">Pros (max 3)</p>
+              <p className="mb-2 text-xs text-slate-300">
+                Pros (max 3) based on played position
+              </p>
               <div className="flex flex-wrap gap-2">
                 {activeReviewTagOptions.map((tag) => {
                   const active = reviewForm.pros.includes(tag);
@@ -1311,7 +1366,9 @@ export default function HomePage() {
             </div>
 
             <div>
-              <p className="mb-2 text-xs text-slate-300">Cons (max 2)</p>
+              <p className="mb-2 text-xs text-slate-300">
+                Cons (max 2) based on played position
+              </p>
               <div className="flex flex-wrap gap-2">
                 {activeReviewTagOptions.map((tag) => {
                   const active = reviewForm.cons.includes(tag);
