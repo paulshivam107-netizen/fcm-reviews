@@ -84,6 +84,9 @@ Review submissions write to `public.user_review_submissions` via `POST /api/revi
 Latest review feed reads from `public.player_sentiment_mentions` and approved
 `public.user_review_submissions` via `GET /api/player-reviews`.
 
+Basic product analytics are recorded via `POST /api/track` into
+`public.app_event_logs` (searches, card opens, submissions, moderation actions).
+
 ## Local mock mode
 
 Set `USE_LOCAL_MOCK_DATA=true` to bypass Supabase reads/writes during local UI testing.

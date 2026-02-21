@@ -96,6 +96,17 @@ export default function PlayerDetailPage() {
           setPlayer(playerPayload.item);
           setReviews(reviewPayload.items);
           setState("success");
+          void fetch("/api/track", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              eventType: "card_opened",
+              playerId,
+              metadata: { surface: "player_page" },
+            }),
+          }).catch(() => undefined);
         }
       } catch (loadError) {
         if (cancelled) return;

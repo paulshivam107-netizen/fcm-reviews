@@ -732,7 +732,23 @@ export default function HomePage() {
 
   const onSubmitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setQuery(queryDraft.trim());
+    const nextQuery = queryDraft.trim();
+    setQuery(nextQuery);
+    if (nextQuery) {
+      void fetch("/api/track", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          eventType: "search_submitted",
+          queryText: nextQuery,
+          metadata: {
+            tab: activeTab,
+          },
+        }),
+      }).catch(() => undefined);
+    }
   };
 
   const onSelectPlayerForReview = (player: PlayerRow) => {
@@ -747,6 +763,22 @@ export default function HomePage() {
     setSelectedInsightPlayer((current) =>
       current?.player_id === player.player_id ? null : player
     );
+    if (selectedInsightPlayer?.player_id !== player.player_id) {
+      void fetch("/api/track", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          eventType: "card_opened",
+          playerId: player.player_id,
+          metadata: {
+            surface: "home_card",
+            tab: activeTab,
+          },
+        }),
+      }).catch(() => undefined);
+    }
   };
 
   const onOpenGlobalAddReview = () => {
