@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { LOCAL_MOCK_PLAYERS, shouldUseLocalMockData } from "@/lib/local-mock-data";
+import {
+  findLocalMockPlayerByIdentity,
+  LOCAL_MOCK_PLAYERS,
+  shouldUseLocalMockData,
+} from "@/lib/local-mock-data";
 import { PlayerApiResponse, PlayerRow } from "@/types/player";
 
 const SUMMARY_FIELDS = [
@@ -18,6 +22,18 @@ const SUMMARY_FIELDS = [
 function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
+  );
+}
+
+function hasReviewSignal(row: PlayerRow) {
+  const prosCount = Array.isArray(row.top_pros) ? row.top_pros.length : 0;
+  const consCount = Array.isArray(row.top_cons) ? row.top_cons.length : 0;
+  return (
+    Number(row.mention_count ?? 0) > 0 ||
+    row.avg_sentiment_score !== null ||
+    prosCount > 0 ||
+    consCount > 0 ||
+    Boolean(row.last_processed_at)
   );
 }
 
@@ -102,8 +118,24 @@ export async function GET(
     if (summaryResponse.ok) {
       const rows = (await summaryResponse.json()) as PlayerRow[];
       if (rows.length > 0) {
+        const summaryRow = rows[0];
+        if (!hasReviewSignal(summaryRow)) {
+          const localByIdentity = findLocalMockPlayerByIdentity({
+            playerName: summaryRow.player_name,
+            baseOvr: summaryRow.base_ovr,
+            programPromo: summaryRow.program_promo,
+          });
+          if (localByIdentity) {
+            return buildResponse({
+              item: localByIdentity,
+              cacheControl: "no-store",
+              dataSource: "local-mock-fallback",
+            });
+          }
+        }
+
         return buildResponse({
-          item: rows[0],
+          item: summaryRow,
           cacheControl: "s-maxage=300, stale-while-revalidate=3600",
           dataSource: "supabase",
         });
@@ -155,6 +187,19 @@ export async function GET(
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
 
+    const localByIdentity = findLocalMockPlayerByIdentity({
+      playerName: baseRow.player_name,
+      baseOvr: baseRow.base_ovr,
+      programPromo: baseRow.program_promo,
+    });
+    if (localByIdentity) {
+      return buildResponse({
+        item: localByIdentity,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
     return buildResponse({
       item: {
         player_id: baseRow.id,
@@ -189,4 +234,3 @@ export async function GET(
     );
   }
 }
-

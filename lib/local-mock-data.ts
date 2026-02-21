@@ -579,6 +579,7 @@ export function queryLocalMockPlayers(args: {
   positionGroups: Record<PlayerTab, string[]>;
 }): PlayerRow[] {
   const { tab, parsed, limit, positionGroups } = args;
+  const hasQuery = parsed.raw.trim().length > 0;
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const allowedPositions = new Set(positionGroups[tab]);
@@ -586,7 +587,7 @@ export function queryLocalMockPlayers(args: {
 
   let rows = LOCAL_MOCK_PLAYERS;
 
-  if (!isOvrOnlyQuery) {
+  if (!hasQuery && !isOvrOnlyQuery) {
     rows = rows.filter((row) => allowedPositions.has(row.base_position));
   }
 
@@ -607,6 +608,38 @@ export function queryLocalMockPlayers(args: {
   });
 
   return rows.slice(0, limit);
+}
+
+function normalizeIdentityValue(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function findLocalMockPlayerByIdentity(args: {
+  playerName: string;
+  baseOvr: number;
+  programPromo?: string | null;
+}): PlayerRow | null {
+  const nameKey = normalizeIdentityValue(args.playerName);
+  const programKey = normalizeIdentityValue(args.programPromo);
+  if (!nameKey || !Number.isFinite(args.baseOvr)) return null;
+
+  const candidates = LOCAL_MOCK_PLAYERS.filter(
+    (row) =>
+      normalizeIdentityValue(row.player_name) === nameKey &&
+      row.base_ovr === args.baseOvr
+  );
+
+  if (!candidates.length) return null;
+  if (!programKey) return candidates[0] ?? null;
+
+  return (
+    candidates.find(
+      (row) => normalizeIdentityValue(row.program_promo) === programKey
+    ) ?? candidates[0] ?? null
+  );
 }
 
 export function queryLocalMockReviewsByPlayer(args: {
@@ -639,4 +672,23 @@ export function queryLocalMockReviewsByPlayer(args: {
       summary: seed.note,
       submittedAt: seed.submitted_at,
     }));
+}
+
+export function queryLocalMockReviewsByIdentity(args: {
+  playerName: string;
+  baseOvr: number;
+  programPromo?: string | null;
+  limit: number;
+}): PlayerReviewFeedItem[] {
+  const localPlayer = findLocalMockPlayerByIdentity({
+    playerName: args.playerName,
+    baseOvr: args.baseOvr,
+    programPromo: args.programPromo,
+  });
+
+  if (!localPlayer) return [];
+  return queryLocalMockReviewsByPlayer({
+    playerId: localPlayer.player_id,
+    limit: args.limit,
+  });
 }
