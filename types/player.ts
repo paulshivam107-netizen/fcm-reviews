@@ -27,3 +27,7 @@ export type PlayersApiResponse = {
     count: number;
   };
 };
+
+export type PlayerApiResponse = {
+  item: PlayerRow;
+};

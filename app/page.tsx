@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
@@ -153,6 +154,12 @@ function StarMeter({ score }: { score: number | null }) {
       <span className="text-slate-500">{"★".repeat(10 - filled)}</span>
     </span>
   );
+}
+
+function sourceBadgeClass(source: PlayerReviewFeedItem["sourcePlatform"]) {
+  return source === "reddit"
+    ? "border-lime-300/40 bg-lime-300/12 text-lime-100"
+    : "border-sky-300/40 bg-sky-300/12 text-sky-100";
 }
 
 function LoadingCards() {
@@ -355,16 +362,25 @@ function PlayerCard({
       </div>
 
       <div className="mt-4">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onAddReview(row);
-          }}
-          className="w-full rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
-        >
-          Add Review
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onAddReview(row);
+            }}
+            className="rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+          >
+            Add Review
+          </button>
+          <Link
+            href={`/player/${row.player_id}`}
+            onClick={(event) => event.stopPropagation()}
+            className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+          >
+            View Card
+          </Link>
+        </div>
       </div>
     </article>
   );
@@ -516,9 +532,19 @@ function InsightPanel({
                       {formatLastProcessedAt(review.submittedAt)}
                     </p>
                   </div>
-                  <p className="text-xs font-semibold text-lime-200">
-                    {formatSentiment(review.sentimentScore)}
-                  </p>
+                  <div className="text-right">
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em]",
+                        sourceBadgeClass(review.sourcePlatform),
+                      ].join(" ")}
+                    >
+                      {review.sourcePlatform === "reddit" ? "Reddit" : "Web User"}
+                    </span>
+                    <p className="mt-1 text-xs font-semibold text-lime-200">
+                      {formatSentiment(review.sentimentScore)}
+                    </p>
+                  </div>
                 </div>
 
                 <p className="mt-2 text-xs leading-relaxed text-slate-200">
@@ -548,6 +574,12 @@ function InsightPanel({
       >
         Add Review For This Card
       </button>
+      <Link
+        href={`/player/${player.player_id}`}
+        className="mt-2 block w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+      >
+        Open Full Card Page
+      </Link>
     </section>
   );
 }
