@@ -20,6 +20,14 @@ const MV_FIELDS = [
 const MAX_LIMIT = 60;
 const SUPABASE_REQUEST_TIMEOUT_MS = 9000;
 
+type PlayerIdentityRow = {
+  id: string;
+  player_name: string;
+  base_ovr: number;
+  base_position: string;
+  program_promo: string;
+};
+
 function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
 }
@@ -62,6 +70,53 @@ function buildPlayersResponse(args: {
       },
     }
   );
+}
+
+async function hydrateLatestPlayerIdentity(args: {
+  rows: PlayerRow[];
+  supabaseUrl: string;
+  supabaseKey: string;
+}): Promise<PlayerRow[]> {
+  const { rows, supabaseUrl, supabaseKey } = args;
+  if (!rows.length) return rows;
+
+  const playerIds = Array.from(new Set(rows.map((row) => row.player_id)));
+  const playersUrl = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/players`);
+  playersUrl.searchParams.set(
+    "select",
+    "id,player_name,base_ovr,base_position,program_promo"
+  );
+  playersUrl.searchParams.set("id", `in.(${playerIds.join(",")})`);
+  playersUrl.searchParams.set("is_active", "eq.true");
+
+  const identityResponse = await fetch(playersUrl, {
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+    },
+    next: { revalidate: 300 },
+  });
+
+  if (!identityResponse.ok) {
+    return rows;
+  }
+
+  const identityRows = (await identityResponse.json()) as PlayerIdentityRow[];
+  const byId = new Map(identityRows.map((row) => [row.id, row]));
+
+  return rows
+    .map((row) => {
+      const currentIdentity = byId.get(row.player_id);
+      if (!currentIdentity) return null;
+      return {
+        ...row,
+        player_name: currentIdentity.player_name,
+        base_ovr: currentIdentity.base_ovr,
+        base_position: currentIdentity.base_position,
+        program_promo: currentIdentity.program_promo,
+      };
+    })
+    .filter((row): row is PlayerRow => row !== null);
 }
 
 export async function GET(request: NextRequest) {
@@ -207,8 +262,13 @@ export async function GET(request: NextRequest) {
 
   const rows = (await response.json()) as PlayerRow[];
   const reviewedRows = rows.filter(hasReviewSignal);
+  const hydratedRows = await hydrateLatestPlayerIdentity({
+    rows: reviewedRows,
+    supabaseUrl,
+    supabaseKey,
+  });
   const mockRows = getMockRows();
-  const hasAnyReviewSignal = reviewedRows.length > 0;
+  const hasAnyReviewSignal = hydratedRows.length > 0;
 
   if (!hasAnyReviewSignal && mockRows.length > 0) {
     return buildPlayersResponse({
@@ -221,7 +281,7 @@ export async function GET(request: NextRequest) {
   }
 
   return buildPlayersResponse({
-    rows: reviewedRows,
+    rows: hydratedRows,
     tab,
     parsed,
     cacheControl: "s-maxage=300, stale-while-revalidate=3600",
