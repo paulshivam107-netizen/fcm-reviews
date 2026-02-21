@@ -449,26 +449,33 @@ export default function AdminPlayersPage() {
         }),
       });
 
-      const payload = (await response.json()) as {
-        error?: string;
-        item?: AdminPlayerItem;
-      };
+      const payload = (await response.json()) as
+        | AdminPlayerMutationResponse
+        | { error?: string };
       if (!response.ok) {
         if (response.status === 401) {
           setAuthState("unauthenticated");
           setAdminEmail(null);
           throw new Error("Session expired. Please sign in again.");
         }
-        throw new Error(payload.error ?? `Request failed (${response.status})`);
+        const message =
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
       }
 
-      if (payload.item) {
+      if ("item" in payload && payload.item) {
         setRows((current) =>
           current.map((row) => (row.playerId === playerId ? payload.item! : row))
         );
       }
       cancelEdit(playerId);
-      setFeedback("Player updated.");
+      if ("mergedFromPlayerId" in payload && payload.mergedFromPlayerId) {
+        setFeedback("Player updated. Reviews were reassigned from the duplicate card.");
+      } else {
+        setFeedback("Player updated.");
+      }
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Update failed.");
     } finally {
