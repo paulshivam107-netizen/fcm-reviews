@@ -267,10 +267,19 @@ export async function GET(request: NextRequest) {
     supabaseUrl,
     supabaseKey,
   });
-  const mockRows = getMockRows();
   const hasAnyReviewSignal = hydratedRows.length > 0;
 
-  if (!hasAnyReviewSignal && mockRows.length > 0) {
+  if (!hasAnyReviewSignal && allowMockFallback) {
+    const mockRows = getMockRows();
+    if (!mockRows.length) {
+      return buildPlayersResponse({
+        rows: [],
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "supabase",
+      });
+    }
     return buildPlayersResponse({
       rows: mockRows,
       tab,
