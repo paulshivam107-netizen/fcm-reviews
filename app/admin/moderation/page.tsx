@@ -423,7 +423,7 @@ export default function AdminModerationPage() {
 
           {rows.map((row) => {
             const actionState = actionById[row.submissionId];
-            const isBusy = actionState !== null;
+            const isBusy = actionState === "approve" || actionState === "reject";
             return (
               <article
                 key={row.submissionId}
