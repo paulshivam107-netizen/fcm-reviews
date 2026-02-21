@@ -12,6 +12,7 @@ import Link from "next/link";
 import { LegalFooter } from "@/components/legal-footer";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
+import { getReviewTagsForPosition } from "@/lib/review-attributes";
 import { parsePlayerSearch } from "@/lib/search";
 import {
   PlayerInsightTerm,
@@ -46,17 +47,6 @@ type ReviewFeedback = {
   kind: "success" | "error";
   message: string;
 };
-
-const ATTRIBUTE_TAGS = [
-  "Pace",
-  "Finishing",
-  "Dribbling",
-  "Passing",
-  "Physical",
-  "Positioning",
-  "Weak Foot",
-  "Long Shots",
-] as const;
 
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
@@ -155,6 +145,11 @@ function buildInitialReviewForm(
 
 function normalizePositionInput(value: string) {
   return value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+}
+
+function filterTagsForPosition(tags: string[], position: string) {
+  const allowed = new Set(getReviewTagsForPosition(position));
+  return tags.filter((tag) => allowed.has(tag));
 }
 
 function StarMeter({ score }: { score: number | null }) {
@@ -623,6 +618,13 @@ export default function HomePage() {
     []
   );
   const isReviewPanelOpen = reviewForm !== null;
+  const activeReviewTagOptions = useMemo(
+    () =>
+      getReviewTagsForPosition(
+        reviewForm?.playedPosition ?? selectedPlayer?.base_position ?? "ST"
+      ),
+    [reviewForm?.playedPosition, selectedPlayer?.base_position]
+  );
 
   useEffect(() => {
     setIsHydrated(true);
@@ -845,9 +847,12 @@ export default function HomePage() {
       }
 
       if (field === "playedPosition") {
+        const nextPosition = normalizePositionInput(nextValue);
         setReviewForm({
           ...reviewForm,
-          playedPosition: normalizePositionInput(nextValue),
+          playedPosition: nextPosition,
+          pros: filterTagsForPosition(reviewForm.pros, nextPosition),
+          cons: filterTagsForPosition(reviewForm.cons, nextPosition),
         });
         return;
       }
@@ -873,6 +878,8 @@ export default function HomePage() {
 
   const toggleTag = (kind: "pros" | "cons", tag: string, max: number) => {
     if (!reviewForm) return;
+    const allowedTags = new Set(getReviewTagsForPosition(reviewForm.playedPosition));
+    if (!allowedTags.has(tag)) return;
 
     const source = kind === "pros" ? reviewForm.pros : reviewForm.cons;
     const hasTag = source.includes(tag);
@@ -1282,7 +1289,7 @@ export default function HomePage() {
             <div>
               <p className="mb-2 text-xs text-slate-300">Pros (max 3)</p>
               <div className="flex flex-wrap gap-2">
-                {ATTRIBUTE_TAGS.map((tag) => {
+                {activeReviewTagOptions.map((tag) => {
                   const active = reviewForm.pros.includes(tag);
                   return (
                     <button
@@ -1306,7 +1313,7 @@ export default function HomePage() {
             <div>
               <p className="mb-2 text-xs text-slate-300">Cons (max 2)</p>
               <div className="flex flex-wrap gap-2">
-                {ATTRIBUTE_TAGS.map((tag) => {
+                {activeReviewTagOptions.map((tag) => {
                   const active = reviewForm.cons.includes(tag);
                   return (
                     <button

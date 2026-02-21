@@ -114,7 +114,6 @@ export async function GET(request: NextRequest) {
 
   const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
   url.searchParams.set("select", MV_FIELDS);
-  url.searchParams.set("mention_count", "gt.0");
   if (!isOvrOnlyQuery) {
     url.searchParams.set(
       "base_position",
