@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { getReviewTagsForPosition } from "@/lib/review-attributes";
+import {
+  getReviewTagsForPosition,
+  REVIEW_POSITIONS_BY_GROUP,
+} from "@/lib/review-attributes";
 import {
   AdminArchiveStaleResponse,
   AdminManualReviewResponse,
@@ -708,11 +711,10 @@ export default function AdminPlayersPage() {
                 </label>
                 <label className="text-xs text-slate-300">
                   Played Position
-                  <input
-                    type="text"
+                  <select
                     value={manualReview.playedPosition}
                     onChange={(event) => {
-                      const nextPosition = normalizePositionInput(event.target.value);
+                      const nextPosition = event.target.value;
                       setManualReview((current) => ({
                         ...current,
                         playedPosition: nextPosition,
@@ -720,9 +722,53 @@ export default function AdminPlayersPage() {
                         cons: filterTagsForPosition(current.cons, nextPosition),
                       }));
                     }}
-                    maxLength={4}
                     className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm uppercase text-slate-100 outline-none"
-                  />
+                  >
+                    <optgroup label="Attacker">
+                      {REVIEW_POSITIONS_BY_GROUP.attacker.map((position) => (
+                        <option
+                          key={position}
+                          value={position}
+                          className="bg-slate-900 text-slate-100"
+                        >
+                          {position}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Midfielder">
+                      {REVIEW_POSITIONS_BY_GROUP.midfielder.map((position) => (
+                        <option
+                          key={position}
+                          value={position}
+                          className="bg-slate-900 text-slate-100"
+                        >
+                          {position}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Defender">
+                      {REVIEW_POSITIONS_BY_GROUP.defender.map((position) => (
+                        <option
+                          key={position}
+                          value={position}
+                          className="bg-slate-900 text-slate-100"
+                        >
+                          {position}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Goalkeeper">
+                      {REVIEW_POSITIONS_BY_GROUP.goalkeeper.map((position) => (
+                        <option
+                          key={position}
+                          value={position}
+                          className="bg-slate-900 text-slate-100"
+                        >
+                          {position}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
                 </label>
               </div>
 
@@ -760,7 +806,9 @@ export default function AdminPlayersPage() {
               </div>
 
               <div>
-                <p className="mb-2 text-xs text-slate-300">Pros tags (max 3)</p>
+                <p className="mb-2 text-xs text-slate-300">
+                  Pros tags (max 3) based on played position
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {manualTagOptions.map((tag) => {
                     const active = manualReview.pros.includes(tag);
@@ -784,7 +832,9 @@ export default function AdminPlayersPage() {
               </div>
 
               <div>
-                <p className="mb-2 text-xs text-slate-300">Cons tags (max 2)</p>
+                <p className="mb-2 text-xs text-slate-300">
+                  Cons tags (max 2) based on played position
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {manualTagOptions.map((tag) => {
                     const active = manualReview.cons.includes(tag);

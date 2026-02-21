@@ -4,12 +4,16 @@ export type ReviewRoleGroup =
   | "defender"
   | "goalkeeper";
 
-const POSITIONS_BY_GROUP: Record<ReviewRoleGroup, readonly string[]> = {
+export const REVIEW_POSITIONS_BY_GROUP: Record<ReviewRoleGroup, readonly string[]> = {
   attacker: ["ST", "CF", "LW", "RW", "LF", "RF"],
   midfielder: ["CAM", "CM", "CDM", "LM", "RM"],
   defender: ["CB", "LB", "RB", "LWB", "RWB"],
   goalkeeper: ["GK"],
 };
+
+export const REVIEW_POSITION_OPTIONS = Array.from(
+  new Set(Object.values(REVIEW_POSITIONS_BY_GROUP).flat())
+);
 
 export const REVIEW_TAGS_BY_GROUP: Record<ReviewRoleGroup, readonly string[]> = {
   attacker: [
@@ -71,7 +75,7 @@ export function getReviewGroupFromPosition(
   const normalized = normalizePosition(position);
   if (!normalized) return null;
 
-  for (const [group, positions] of Object.entries(POSITIONS_BY_GROUP) as Array<
+  for (const [group, positions] of Object.entries(REVIEW_POSITIONS_BY_GROUP) as Array<
     [ReviewRoleGroup, readonly string[]]
   >) {
     if (positions.includes(normalized)) {
@@ -87,6 +91,12 @@ export function getReviewTagsForPosition(
 ): readonly string[] {
   const group = getReviewGroupFromPosition(position);
   return group ? REVIEW_TAGS_BY_GROUP[group] : ALL_REVIEW_TAGS;
+}
+
+export function isKnownReviewPosition(
+  position: string | null | undefined
+): boolean {
+  return REVIEW_POSITION_OPTIONS.includes(normalizePosition(position));
 }
 
 export function sanitizeReviewTagArray(args: {
