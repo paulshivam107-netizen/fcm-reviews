@@ -127,10 +127,8 @@ export async function GET(request: NextRequest) {
   ).trim();
   const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
   const allowMockFallback =
-    String(
-      process.env.USE_LOCAL_MOCK_FALLBACK ??
-        (process.env.NODE_ENV === "production" ? "false" : "true")
-    ).toLowerCase() !== "false";
+    process.env.NODE_ENV !== "production" &&
+    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "true").toLowerCase() !== "false";
 
   if (!isUuidLike(playerId)) {
     return NextResponse.json({ error: "Invalid playerId" }, { status: 400 });
