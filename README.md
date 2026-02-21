@@ -32,6 +32,7 @@ Set:
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 - `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
+- `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; enable UI ad placeholders when ready)
 
 3. Start dev server:
 
@@ -57,6 +58,10 @@ npm run dev
   - pending moderation by default
   - optional username attribution (`reddit` or `in-game`)
   - 5 submissions max per 24h per submitter fingerprint
+- Card insight panel:
+  - aggregate sentiment/pros/cons
+  - latest review feed (Reddit + approved user submissions)
+- Ad-slot placeholders (top, in-feed, footer) toggleable via env flag
 
 ## Data contract
 
@@ -64,14 +69,16 @@ The frontend reads from `public.mv_player_sentiment_summary` via `GET /api/playe
 
 Review submissions write to `public.user_review_submissions` via `POST /api/reviews`.
 
+Latest review feed reads from `public.player_sentiment_mentions` and approved
+`public.user_review_submissions` via `GET /api/player-reviews`.
+
 ## Local mock mode
 
 Set `USE_LOCAL_MOCK_DATA=true` to bypass Supabase reads/writes during local UI testing.
 
 Seeded demo content includes:
 
-- Harry Kewell (Glorious Era, 113 LW) player card
-- One demo review derived from your provided Kewell notes
+- multiple Reddit-sourced review seeds for cards you provided
 
 Search behavior:
 

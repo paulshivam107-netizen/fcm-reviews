@@ -19,3 +19,25 @@ export type ReviewSubmissionResponse = {
   refreshed: boolean;
   message: string;
 };
+
+export type PlayerReviewFeedItem = {
+  id: string;
+  sourcePlatform: "reddit" | "user";
+  sourceLabel: string;
+  sourceUrl: string | null;
+  sentimentScore: number;
+  playedPosition: string | null;
+  mentionedRankText: string | null;
+  pros: string[];
+  cons: string[];
+  summary: string | null;
+  submittedAt: string;
+};
+
+export type PlayerReviewsApiResponse = {
+  items: PlayerReviewFeedItem[];
+  meta: {
+    playerId: string;
+    count: number;
+  };
+};

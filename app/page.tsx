@@ -10,7 +10,11 @@ import {
   PlayerRow,
   PlayerTab,
 } from "@/types/player";
-import { SubmittedUsernameType } from "@/types/review";
+import {
+  PlayerReviewFeedItem,
+  PlayerReviewsApiResponse,
+  SubmittedUsernameType,
+} from "@/types/review";
 
 type FetchState = "idle" | "loading" | "success" | "error";
 
@@ -60,6 +64,15 @@ function formatLastProcessedAt(timestamp: string | null) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function summarizeReviewText(text: string | null, maxChars = 220) {
+  const normalized = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "No summary available for this review yet.";
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars).trimEnd()}...`;
 }
 
 function normalizeInsightTerms(terms: PlayerInsightTerm[] | undefined) {
@@ -239,10 +252,16 @@ function PlayerCard({
 
 function InsightPanel({
   player,
+  reviews,
+  reviewsState,
+  reviewsError,
   onClose,
   onAddReview,
 }: {
   player: PlayerRow;
+  reviews: PlayerReviewFeedItem[];
+  reviewsState: FetchState;
+  reviewsError: string | null;
   onClose: () => void;
   onAddReview: (player: PlayerRow) => void;
 }) {
@@ -341,6 +360,67 @@ function InsightPanel({
         </div>
       </div>
 
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-300">
+          Latest Reviews
+        </p>
+
+        {reviewsState === "loading" && (
+          <p className="text-xs text-slate-400">Loading latest review feed...</p>
+        )}
+
+        {reviewsState === "error" && (
+          <p className="text-xs text-rose-200">
+            Could not load latest reviews: {reviewsError ?? "Unknown error"}
+          </p>
+        )}
+
+        {reviewsState === "success" && reviews.length === 0 && (
+          <p className="text-xs text-slate-400">No approved reviews available yet.</p>
+        )}
+
+        {reviewsState === "success" && reviews.length > 0 && (
+          <div className="space-y-2">
+            {reviews.map((review) => (
+              <article
+                key={review.id}
+                className="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-300">
+                      {review.sourceLabel}
+                      {review.playedPosition ? ` • ${review.playedPosition}` : ""}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      {formatLastProcessedAt(review.submittedAt)}
+                    </p>
+                  </div>
+                  <p className="text-xs font-semibold text-lime-200">
+                    {formatSentiment(review.sentimentScore)}
+                  </p>
+                </div>
+
+                <p className="mt-2 text-xs leading-relaxed text-slate-200">
+                  {summarizeReviewText(review.summary)}
+                </p>
+
+                {review.sourceUrl && (
+                  <a
+                    href={review.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-block text-xs font-medium text-lime-200 underline-offset-2 hover:underline"
+                  >
+                    Open source
+                  </a>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
       <button
         type="button"
         onClick={() => onAddReview(player)}
@@ -366,6 +446,9 @@ export default function HomePage() {
   const [reviewForm, setReviewForm] = useState<ReviewFormState | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [insightReviews, setInsightReviews] = useState<PlayerReviewFeedItem[]>([]);
+  const [insightReviewsState, setInsightReviewsState] = useState<FetchState>("idle");
+  const [insightReviewsError, setInsightReviewsError] = useState<string | null>(null);
 
   const tabList = useMemo(
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
@@ -437,6 +520,60 @@ export default function HomePage() {
       clearTimeout(timeoutId);
     };
   }, [isHydrated, activeTab, query]);
+
+  useEffect(() => {
+    const playerId = selectedInsightPlayer?.player_id;
+    if (!playerId) {
+      setInsightReviews([]);
+      setInsightReviewsState("idle");
+      setInsightReviewsError(null);
+      return;
+    }
+    const activePlayerId = playerId;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadInsightReviews() {
+      setInsightReviewsState("loading");
+      setInsightReviewsError(null);
+
+      try {
+        const params = new URLSearchParams({
+          playerId: activePlayerId,
+          limit: "5",
+        });
+        const response = await fetch(`/api/player-reviews?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+
+        const payload = (await response.json()) as PlayerReviewsApiResponse;
+        if (!cancelled) {
+          setInsightReviews(payload.items);
+          setInsightReviewsState("success");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof Error && error.name === "AbortError") return;
+
+        setInsightReviews([]);
+        setInsightReviewsState("error");
+        setInsightReviewsError(
+          error instanceof Error ? error.message : "Unknown error"
+        );
+      }
+    }
+
+    loadInsightReviews();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [selectedInsightPlayer?.player_id]);
 
   const onSubmitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -718,6 +855,9 @@ export default function HomePage() {
               {selectedInsightPlayer?.player_id === row.player_id && (
                 <InsightPanel
                   player={row}
+                  reviews={insightReviews}
+                  reviewsState={insightReviewsState}
+                  reviewsError={insightReviewsError}
                   onClose={() => setSelectedInsightPlayer(null)}
                   onAddReview={onSelectPlayerForReview}
                 />

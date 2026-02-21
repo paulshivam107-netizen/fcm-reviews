@@ -1,5 +1,6 @@
 import { ParsedSearch } from "@/lib/search";
 import { PlayerRow, PlayerTab } from "@/types/player";
+import { PlayerReviewFeedItem } from "@/types/review";
 
 export type LocalMockReviewSeed = {
   id: string;
@@ -602,4 +603,36 @@ export function queryLocalMockPlayers(args: {
   });
 
   return rows.slice(0, limit);
+}
+
+export function queryLocalMockReviewsByPlayer(args: {
+  playerId: string;
+  limit: number;
+}): PlayerReviewFeedItem[] {
+  const { playerId, limit } = args;
+
+  return LOCAL_MOCK_REVIEW_SEEDS.filter(
+    (seed) => seed.player_id === playerId && seed.status === "approved"
+  )
+    .sort(
+      (a, b) =>
+        new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
+    )
+    .slice(0, limit)
+    .map((seed) => ({
+      id: seed.id,
+      sourcePlatform: "reddit",
+      sourceLabel:
+        seed.submitted_username_type === "reddit" && seed.submitted_username
+          ? `u/${seed.submitted_username}`
+          : seed.submitted_username ?? "Reddit",
+      sourceUrl: null,
+      sentimentScore: seed.sentiment_score,
+      playedPosition: seed.played_position,
+      mentionedRankText: seed.mentioned_rank_text,
+      pros: seed.pros,
+      cons: seed.cons,
+      summary: seed.note,
+      submittedAt: seed.submitted_at,
+    }));
 }
