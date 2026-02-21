@@ -94,6 +94,13 @@ function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
 }
 
+function normalizeLookupKey(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function normalizePosition(value: string | null | undefined) {
   const cleaned = String(value ?? "")
     .toUpperCase()
@@ -190,6 +197,126 @@ async function loadSummaryMap(playerIds: string[]) {
     out.set(row.player_id, row);
   }
   return out;
+}
+
+async function adoptReviewedSiblingIfNeeded(args: {
+  updated: SupabasePlayerRow;
+  targetMentionCount: number;
+  identityChanged: boolean;
+}): Promise<{ mergedFromPlayerId: string | null; refreshed: boolean }> {
+  const { updated, targetMentionCount, identityChanged } = args;
+  if (!identityChanged || targetMentionCount > 0) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const cleanedName = sanitizeForIlike(updated.player_name);
+  if (!cleanedName) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const siblingResponse = await supabaseRestRequest({
+    endpoint: "players",
+    method: "GET",
+    query: {
+      select: [
+        "id",
+        "player_name",
+        "base_ovr",
+        "base_position",
+        "program_promo",
+        "is_active",
+        "created_at",
+        "updated_at",
+      ].join(","),
+      id: `neq.${updated.id}`,
+      is_active: "eq.true",
+      base_position: `eq.${updated.base_position}`,
+      player_name: `ilike.*${cleanedName}*`,
+      limit: "20",
+    },
+    cache: "no-store",
+  });
+
+  if (!siblingResponse.ok) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const siblingRows = (await siblingResponse.json()) as SupabasePlayerRow[];
+  const exactSiblings = siblingRows.filter(
+    (row) =>
+      normalizeLookupKey(row.player_name) === normalizeLookupKey(updated.player_name)
+  );
+  if (exactSiblings.length === 0) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const siblingSummaryMap = await loadSummaryMap(exactSiblings.map((row) => row.id));
+  const reviewedSiblings = exactSiblings.filter(
+    (row) => (siblingSummaryMap.get(row.id)?.mention_count ?? 0) > 0
+  );
+
+  // Keep this deterministic and safe: auto-adopt only when there is exactly one
+  // reviewed sibling candidate.
+  if (reviewedSiblings.length !== 1) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const source = reviewedSiblings[0];
+
+  const moveMentionsResponse = await supabaseRestRequest({
+    endpoint: "player_sentiment_mentions",
+    method: "PATCH",
+    query: {
+      player_id: `eq.${source.id}`,
+    },
+    body: {
+      player_id: updated.id,
+    },
+    cache: "no-store",
+  });
+  if (!moveMentionsResponse.ok) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const moveUserReviewsResponse = await supabaseRestRequest({
+    endpoint: "user_review_submissions",
+    method: "PATCH",
+    query: {
+      player_id: `eq.${source.id}`,
+    },
+    body: {
+      player_id: updated.id,
+    },
+    cache: "no-store",
+  });
+  if (!moveUserReviewsResponse.ok) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const archiveSourceResponse = await supabaseRestRequest({
+    endpoint: "players",
+    method: "PATCH",
+    query: {
+      id: `eq.${source.id}`,
+    },
+    body: {
+      is_active: false,
+    },
+    cache: "no-store",
+  });
+  if (!archiveSourceResponse.ok) {
+    return { mergedFromPlayerId: null, refreshed: false };
+  }
+
+  const refreshResponse = await supabaseRpcRequest({
+    endpoint: "refresh_player_sentiment_summary",
+    body: {},
+  });
+
+  return {
+    mergedFromPlayerId: source.id,
+    refreshed: refreshResponse.ok,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -332,6 +459,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const updates: Record<string, string | number | boolean> = {};
+    let identityChanged = false;
 
     if (payload.playerName !== undefined) {
       const playerName = normalizeFreeText(payload.playerName);
@@ -344,6 +472,7 @@ export async function PATCH(request: NextRequest) {
         );
       }
       updates.player_name = playerName;
+      identityChanged = true;
     }
 
     if (payload.baseOvr !== undefined) {
@@ -355,6 +484,7 @@ export async function PATCH(request: NextRequest) {
         );
       }
       updates.base_ovr = baseOvr;
+      identityChanged = true;
     }
 
     if (payload.basePosition !== undefined) {
@@ -363,6 +493,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: "Invalid basePosition" }, { status: 400 });
       }
       updates.base_position = basePosition;
+      identityChanged = true;
     }
 
     if (payload.programPromo !== undefined) {
@@ -376,6 +507,7 @@ export async function PATCH(request: NextRequest) {
         );
       }
       updates.program_promo = programPromo || FALLBACK_PROGRAM_PROMO;
+      identityChanged = true;
     }
 
     if (payload.isActive !== undefined) {
@@ -472,10 +604,21 @@ export async function PATCH(request: NextRequest) {
     const refreshed = refreshResponse.ok;
 
     const summaryMap = await loadSummaryMap([updated.id]);
+    const initialMentionCount = summaryMap.get(updated.id)?.mention_count ?? 0;
+    const adoptResult = await adoptReviewedSiblingIfNeeded({
+      updated,
+      targetMentionCount: initialMentionCount,
+      identityChanged,
+    });
+    const finalSummaryMap =
+      adoptResult.mergedFromPlayerId !== null
+        ? await loadSummaryMap([updated.id])
+        : summaryMap;
     const response: AdminPlayerMutationResponse = {
       success: true,
-      item: toAdminPlayerItem(updated, summaryMap.get(updated.id)),
-      refreshed,
+      item: toAdminPlayerItem(updated, finalSummaryMap.get(updated.id)),
+      refreshed: refreshed || adoptResult.refreshed,
+      mergedFromPlayerId: adoptResult.mergedFromPlayerId,
     };
 
     return NextResponse.json(response);

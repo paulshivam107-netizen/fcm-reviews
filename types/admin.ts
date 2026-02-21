@@ -24,6 +24,7 @@ export type AdminPlayerMutationResponse = {
   success: boolean;
   item: AdminPlayerItem;
   refreshed: boolean;
+  mergedFromPlayerId?: string | null;
 };
 
 export type AdminArchiveStaleResponse = {
