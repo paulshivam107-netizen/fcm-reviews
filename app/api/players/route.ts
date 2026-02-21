@@ -70,10 +70,8 @@ export async function GET(request: NextRequest) {
     ? Math.max(1, Math.min(MAX_LIMIT, limitRaw))
     : 30;
   const allowMockFallback =
-    String(
-      process.env.USE_LOCAL_MOCK_FALLBACK ??
-        (process.env.NODE_ENV === "production" ? "false" : "true")
-    ).toLowerCase() !== "false";
+    process.env.NODE_ENV !== "production" &&
+    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "true").toLowerCase() !== "false";
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const getMockRows = () =>

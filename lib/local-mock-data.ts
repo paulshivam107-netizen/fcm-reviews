@@ -563,6 +563,10 @@ export function shouldUseLocalMockData(
   supabaseUrl: string | undefined,
   supabaseKey: string | undefined
 ) {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
   const forceMock =
     String(process.env.USE_LOCAL_MOCK_DATA ?? "").toLowerCase() === "true";
   return forceMock || isPlaceholderValue(supabaseUrl) || isPlaceholderValue(supabaseKey);

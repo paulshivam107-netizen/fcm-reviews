@@ -28,8 +28,12 @@ Set:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` (preferred for server API route)
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional fallback)
+- `ADMIN_ALLOWLIST_EMAILS` (comma-separated admin emails)
+- `ADMIN_SESSION_SECRET` (server-only secret for signed admin session cookies)
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
+- `REVIEW_CAPTCHA_REQUIRED` (`true` in production recommended)
+- `TURNSTILE_SECRET_KEY` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (Cloudflare Turnstile)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 - `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
 - `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; enable UI ad placeholders when ready)
@@ -58,10 +62,20 @@ npm run dev
   - pending moderation by default
   - optional username attribution (`reddit` or `in-game`)
   - 5 submissions max per 24h per submitter fingerprint
+  - Turnstile captcha + honeypot trap
+  - near-duplicate review detection for same player
+- Moderation console:
+  - `/admin/moderation`
+  - admin login via Supabase email/password
+  - server-side allowlist + signed admin session cookie
 - Card insight panel:
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)
 - Ad-slot placeholders (top, in-feed, footer) toggleable via env flag
+- Legal pages:
+  - `/terms`
+  - `/privacy`
+  - disclaimer shown in footer
 
 ## Data contract
 
@@ -71,6 +85,9 @@ Review submissions write to `public.user_review_submissions` via `POST /api/revi
 
 Latest review feed reads from `public.player_sentiment_mentions` and approved
 `public.user_review_submissions` via `GET /api/player-reviews`.
+
+Basic product analytics are recorded via `POST /api/track` into
+`public.app_event_logs` (searches, card opens, submissions, moderation actions).
 
 ## Local mock mode
 

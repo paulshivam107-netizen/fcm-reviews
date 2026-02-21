@@ -8,6 +8,8 @@ export type ReviewSubmissionRequest = {
   pros?: string[];
   cons?: string[];
   note?: string;
+  honeypot?: string | null;
+  captchaToken?: string | null;
   submittedUsername?: string | null;
   submittedUsernameType?: SubmittedUsernameType | null;
 };
@@ -38,6 +40,34 @@ export type PlayerReviewsApiResponse = {
   items: PlayerReviewFeedItem[];
   meta: {
     playerId: string;
+    count: number;
+  };
+};
+
+export type ModerationStatus = "pending" | "approved" | "rejected";
+
+export type AdminReviewQueueItem = {
+  submissionId: string;
+  playerId: string;
+  playerName: string;
+  playerOvr: number;
+  playerPosition: string;
+  sentimentScore: number;
+  playedPosition: string;
+  mentionedRankText: string | null;
+  pros: string[];
+  cons: string[];
+  note: string | null;
+  submittedUsername: string | null;
+  submittedUsernameType: SubmittedUsernameType | null;
+  status: ModerationStatus;
+  submittedAt: string;
+};
+
+export type AdminReviewQueueResponse = {
+  items: AdminReviewQueueItem[];
+  meta: {
+    status: ModerationStatus;
     count: number;
   };
 };
