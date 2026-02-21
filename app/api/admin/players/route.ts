@@ -15,6 +15,7 @@ const MIN_OVR = 1;
 const MAX_OVR = 130;
 const MAX_PLAYER_NAME_LENGTH = 72;
 const MAX_PROGRAM_PROMO_LENGTH = 48;
+const FALLBACK_PROGRAM_PROMO = "Community";
 const MIN_STALE_DAYS = 1;
 const MAX_STALE_DAYS = 365;
 const DEFAULT_STALE_DAYS = 30;
@@ -321,7 +322,7 @@ export async function PATCH(request: NextRequest) {
       playerName?: string;
       baseOvr?: number;
       basePosition?: string;
-      programPromo?: string;
+      programPromo?: string | null;
       isActive?: boolean;
     };
 
@@ -366,18 +367,15 @@ export async function PATCH(request: NextRequest) {
 
     if (payload.programPromo !== undefined) {
       const programPromo = normalizeFreeText(payload.programPromo);
-      if (
-        programPromo.length < 1 ||
-        programPromo.length > MAX_PROGRAM_PROMO_LENGTH
-      ) {
+      if (programPromo.length > MAX_PROGRAM_PROMO_LENGTH) {
         return NextResponse.json(
           {
-            error: `programPromo must be between 1 and ${MAX_PROGRAM_PROMO_LENGTH} characters`,
+            error: `programPromo must be at most ${MAX_PROGRAM_PROMO_LENGTH} characters`,
           },
           { status: 400 }
         );
       }
-      updates.program_promo = programPromo;
+      updates.program_promo = programPromo || FALLBACK_PROGRAM_PROMO;
     }
 
     if (payload.isActive !== undefined) {
