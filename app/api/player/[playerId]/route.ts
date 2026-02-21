@@ -67,7 +67,7 @@ export async function GET(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const allowMockFallback =
     process.env.NODE_ENV !== "production" &&
-    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "true").toLowerCase() !== "false";
+    String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "false").toLowerCase() === "true";
   const localItem = LOCAL_MOCK_PLAYERS.find((row) => row.player_id === playerId);
 
   if (shouldUseLocalMockData(supabaseUrl, supabaseKey)) {
