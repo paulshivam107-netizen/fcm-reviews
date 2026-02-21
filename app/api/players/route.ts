@@ -24,6 +24,53 @@ function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
 }
 
+function normalizeIdentityValue(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function toIdentityKey(row: PlayerRow) {
+  return [
+    normalizeIdentityValue(row.player_name),
+    row.base_ovr,
+    normalizeIdentityValue(row.base_position),
+    normalizeIdentityValue(row.program_promo),
+  ].join("|");
+}
+
+function hasReviewSignal(row: PlayerRow) {
+  const prosCount = Array.isArray(row.top_pros) ? row.top_pros.length : 0;
+  const consCount = Array.isArray(row.top_cons) ? row.top_cons.length : 0;
+  return (
+    Number(row.mention_count ?? 0) > 0 ||
+    row.avg_sentiment_score !== null ||
+    prosCount > 0 ||
+    consCount > 0 ||
+    Boolean(row.last_processed_at)
+  );
+}
+
+function mergeRowsWithMockData(args: {
+  rows: PlayerRow[];
+  mockRows: PlayerRow[];
+  limit: number;
+}): PlayerRow[] {
+  const seen = new Set(args.rows.map(toIdentityKey));
+  const merged = [...args.rows];
+
+  for (const row of args.mockRows) {
+    const key = toIdentityKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+    if (merged.length >= args.limit) break;
+  }
+
+  return merged.slice(0, args.limit);
+}
+
 function buildPlayersResponse(args: {
   rows: PlayerRow[];
   tab: PlayerTab;
@@ -74,6 +121,7 @@ export async function GET(request: NextRequest) {
     String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "true").toLowerCase() !== "false";
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
+  const hasSearchQuery = parsed.raw.trim().length > 0;
   const getMockRows = () =>
     queryLocalMockPlayers({
       tab,
@@ -114,7 +162,7 @@ export async function GET(request: NextRequest) {
 
   const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
   url.searchParams.set("select", MV_FIELDS);
-  if (!isOvrOnlyQuery) {
+  if (!hasSearchQuery && !isOvrOnlyQuery) {
     url.searchParams.set(
       "base_position",
       `in.(${POSITION_GROUPS[tab].join(",")})`
@@ -191,9 +239,24 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = (await response.json()) as PlayerRow[];
+  const mockRows = getMockRows();
+  const mergedRows = hasSearchQuery
+    ? mergeRowsWithMockData({ rows, mockRows, limit })
+    : rows;
+  const hasAnyReviewSignal = mergedRows.some(hasReviewSignal);
+
+  if (!hasAnyReviewSignal && mockRows.length > 0) {
+    return buildPlayersResponse({
+      rows: mockRows,
+      tab,
+      parsed,
+      cacheControl: "no-store",
+      dataSource: "local-mock-fallback",
+    });
+  }
 
   return buildPlayersResponse({
-    rows,
+    rows: mergedRows,
     tab,
     parsed,
     cacheControl: "s-maxage=300, stale-while-revalidate=3600",

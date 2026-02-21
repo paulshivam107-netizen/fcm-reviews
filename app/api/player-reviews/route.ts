@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  findLocalMockPlayerByIdentity,
   queryLocalMockReviewsByPlayer,
+  queryLocalMockReviewsByIdentity,
   shouldUseLocalMockData,
 } from "@/lib/local-mock-data";
 import { PlayerReviewFeedItem, PlayerReviewsApiResponse } from "@/types/review";
@@ -34,6 +36,12 @@ type UserSubmissionRow = {
   cons: string[] | null;
   note: string | null;
   submitted_at: string;
+};
+
+type SupabasePlayerIdentityRow = {
+  player_name: string;
+  base_ovr: number;
+  program_promo: string;
 };
 
 function isUuidLike(value: string) {
@@ -272,6 +280,64 @@ export async function GET(request: NextRequest) {
           new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
       )
       .slice(0, limit);
+
+    if (mergedRows.length === 0) {
+      const directMockRows = getFallbackRows(playerId, limit);
+      if (directMockRows.length > 0) {
+        return buildResponse({
+          playerId,
+          items: directMockRows,
+          cacheControl: "no-store",
+          dataSource: "local-mock-fallback",
+        });
+      }
+
+      const playersUrl = new URL(`${baseUrl}/rest/v1/players`);
+      playersUrl.searchParams.set(
+        "select",
+        "player_name,base_ovr,program_promo"
+      );
+      playersUrl.searchParams.set("id", `eq.${playerId}`);
+      playersUrl.searchParams.set("limit", "1");
+
+      const playerIdentityResponse = await fetch(playersUrl, {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        next: { revalidate: 180 },
+        signal: timeoutController.signal,
+      });
+
+      if (playerIdentityResponse.ok) {
+        const identityRows = (await playerIdentityResponse.json()) as SupabasePlayerIdentityRow[];
+        const identityRow = identityRows[0];
+        if (identityRow) {
+          const localByIdentity = findLocalMockPlayerByIdentity({
+            playerName: identityRow.player_name,
+            baseOvr: identityRow.base_ovr,
+            programPromo: identityRow.program_promo,
+          });
+
+          if (localByIdentity) {
+            const identityMockRows = queryLocalMockReviewsByIdentity({
+              playerName: identityRow.player_name,
+              baseOvr: identityRow.base_ovr,
+              programPromo: identityRow.program_promo,
+              limit,
+            });
+            if (identityMockRows.length > 0) {
+              return buildResponse({
+                playerId,
+                items: identityMockRows,
+                cacheControl: "no-store",
+                dataSource: "local-mock-fallback",
+              });
+            }
+          }
+        }
+      }
+    }
 
     return buildResponse({
       playerId,
