@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AdminReviewQueueItem,
   AdminReviewQueueResponse,
@@ -8,6 +8,7 @@ import {
 } from "@/types/review";
 
 type FetchState = "idle" | "loading" | "success" | "error";
+type AuthState = "checking" | "authenticated" | "unauthenticated";
 type ActionState = "approve" | "reject" | null;
 
 const STATUS_TABS: ModerationStatus[] = ["pending", "approved", "rejected"];
@@ -34,8 +35,11 @@ function statusClass(status: ModerationStatus) {
 }
 
 export default function AdminModerationPage() {
-  const [token, setToken] = useState("");
-  const [isTokenReady, setIsTokenReady] = useState(false);
+  const [authState, setAuthState] = useState<AuthState>("checking");
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ModerationStatus>("pending");
   const [rows, setRows] = useState<AdminReviewQueueItem[]>([]);
   const [state, setState] = useState<FetchState>("idle");
@@ -47,16 +51,41 @@ export default function AdminModerationPage() {
   >({});
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("fcm_admin_token");
-    if (stored) {
-      setToken(stored);
+    let cancelled = false;
+
+    async function checkSession() {
+      setAuthState("checking");
+      try {
+        const response = await fetch("/api/admin/auth/me", { cache: "no-store" });
+        if (!response.ok) {
+          if (!cancelled) {
+            setAuthState("unauthenticated");
+            setAdminEmail(null);
+          }
+          return;
+        }
+
+        const payload = (await response.json()) as { email?: string };
+        if (!cancelled) {
+          setAdminEmail(String(payload.email ?? "").trim() || null);
+          setAuthState("authenticated");
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+        }
+      }
     }
-    setIsTokenReady(true);
+
+    checkSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!isTokenReady) return;
-    if (!token.trim()) {
+    if (authState !== "authenticated") {
       setRows([]);
       setState("idle");
       return;
@@ -74,23 +103,27 @@ export default function AdminModerationPage() {
           limit: "60",
         });
         const response = await fetch(`/api/admin/reviews?${params.toString()}`, {
-          headers: {
-            "x-admin-token": token.trim(),
-          },
           cache: "no-store",
         });
 
         const payload = (await response.json()) as unknown;
-
         if (!response.ok) {
-          const errorMessage =
+          const message =
             typeof payload === "object" &&
             payload !== null &&
             "error" in payload &&
             typeof payload.error === "string"
               ? payload.error
               : `Request failed (${response.status})`;
-          throw new Error(errorMessage);
+          if (response.status === 401 && !cancelled) {
+            setAuthState("unauthenticated");
+            setAdminEmail(null);
+            setRows([]);
+            setState("idle");
+            setError("Session expired. Please sign in again.");
+            return;
+          }
+          throw new Error(message);
         }
 
         const data = payload as AdminReviewQueueResponse;
@@ -110,35 +143,77 @@ export default function AdminModerationPage() {
     return () => {
       cancelled = true;
     };
-  }, [isTokenReady, token, statusFilter]);
+  }, [authState, statusFilter]);
 
   const pendingCount = useMemo(
     () => rows.filter((row) => row.status === "pending").length,
     [rows]
   );
 
-  const saveToken = () => {
-    const value = token.trim();
-    if (!value) return;
-    window.localStorage.setItem("fcm_admin_token", value);
-    setToken(value);
-    setFeedback("Admin token saved locally in this browser.");
+  const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = loginEmail.trim().toLowerCase();
+    const password = loginPassword;
+    if (!email || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setError(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/admin/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        email?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Login failed (${response.status})`);
+      }
+
+      setAdminEmail(payload.email ?? email);
+      setLoginPassword("");
+      setAuthState("authenticated");
+      setFeedback("Signed in to moderation.");
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Login failed.");
+      setAuthState("unauthenticated");
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
-  const clearToken = () => {
-    window.localStorage.removeItem("fcm_admin_token");
-    setToken("");
-    setRows([]);
-    setState("idle");
-    setFeedback("Admin token cleared.");
+  const onLogout = async () => {
+    try {
+      await fetch("/api/admin/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      setAuthState("unauthenticated");
+      setAdminEmail(null);
+      setRows([]);
+      setState("idle");
+      setFeedback("Signed out.");
+      setError(null);
+    }
   };
 
   const moderateSubmission = async (
     submissionId: string,
     action: "approve" | "reject"
   ) => {
-    if (!token.trim()) {
-      setError("Add admin token first.");
+    if (authState !== "authenticated") {
+      setError("Please sign in.");
       return;
     }
 
@@ -151,7 +226,6 @@ export default function AdminModerationPage() {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": token.trim(),
         },
         body: JSON.stringify({
           submissionId,
@@ -166,6 +240,11 @@ export default function AdminModerationPage() {
       };
 
       if (!response.ok) {
+        if (response.status === 401) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+          throw new Error("Session expired. Please sign in again.");
+        }
         throw new Error(payload.error ?? `Request failed (${response.status})`);
       }
 
@@ -175,18 +254,15 @@ export default function AdminModerationPage() {
             item.submissionId === submissionId
               ? {
                   ...item,
-                  status: payload.status ?? (action === "approve" ? "approved" : "rejected"),
+                  status:
+                    payload.status ?? (action === "approve" ? "approved" : "rejected"),
                 }
               : item
           )
           .filter((item) => item.status === statusFilter)
       );
 
-      setFeedback(
-        action === "approve"
-          ? "Submission approved."
-          : "Submission rejected."
-      );
+      setFeedback(action === "approve" ? "Submission approved." : "Submission rejected.");
     } catch (moderationError) {
       setError(
         moderationError instanceof Error
@@ -210,58 +286,91 @@ export default function AdminModerationPage() {
         </p>
       </header>
 
-      <section className="glass-panel mb-5 rounded-2xl p-4">
-        <label className="block text-xs text-slate-300">
-          Admin Token
-          <input
-            type="password"
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            placeholder="Paste ADMIN_API_TOKEN"
-            className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-          />
-        </label>
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={saveToken}
-            className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
-          >
-            Save Token
-          </button>
-          <button
-            type="button"
-            onClick={clearToken}
-            className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:bg-white/10"
-          >
-            Clear
-          </button>
+      {authState === "checking" && (
+        <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
+          Checking admin session...
         </div>
-      </section>
+      )}
 
-      <nav
-        className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
-        aria-label="Moderation status tabs"
-      >
-        {STATUS_TABS.map((status) => {
-          const active = status === statusFilter;
-          return (
+      {authState === "unauthenticated" && (
+        <section className="glass-panel mb-5 rounded-2xl p-4">
+          <p className="mb-3 text-xs uppercase tracking-[0.12em] text-slate-300">
+            Admin Sign In
+          </p>
+          <form onSubmit={onSubmitLogin} className="space-y-3">
+            <label className="block text-xs text-slate-300">
+              Email
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+                placeholder="admin@example.com"
+                autoComplete="email"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              />
+            </label>
+            <label className="block text-xs text-slate-300">
+              Password
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                autoComplete="current-password"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              />
+            </label>
             <button
-              key={status}
-              type="button"
-              onClick={() => setStatusFilter(status)}
-              className={[
-                "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
-                active
-                  ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
-                  : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
-              ].join(" ")}
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full rounded-xl bg-accent-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {status}
+              {isLoggingIn ? "Signing in..." : "Sign In"}
             </button>
-          );
-        })}
-      </nav>
+          </form>
+        </section>
+      )}
+
+      {authState === "authenticated" && (
+        <>
+          <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.1em] text-slate-400">Signed in</p>
+              <p className="text-sm font-semibold text-slate-100">{adminEmail}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:bg-white/10"
+            >
+              Sign Out
+            </button>
+          </section>
+
+          <nav
+            className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
+            aria-label="Moderation status tabs"
+          >
+            {STATUS_TABS.map((status) => {
+              const active = status === statusFilter;
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatusFilter(status)}
+                  className={[
+                    "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
+                    active
+                      ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
+                      : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+                  ].join(" ")}
+                >
+                  {status}
+                </button>
+              );
+            })}
+          </nav>
+        </>
+      )}
 
       {feedback && (
         <div className="mb-4 rounded-xl border border-lime-300/30 bg-lime-300/10 px-3 py-2 text-sm text-lime-100">
@@ -275,7 +384,7 @@ export default function AdminModerationPage() {
         </div>
       )}
 
-      {state === "loading" && (
+      {authState === "authenticated" && state === "loading" && (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, index) => (
             <div
@@ -286,13 +395,13 @@ export default function AdminModerationPage() {
         </div>
       )}
 
-      {state === "success" && rows.length === 0 && (
+      {authState === "authenticated" && state === "success" && rows.length === 0 && (
         <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
           No {statusFilter} reviews in queue.
         </div>
       )}
 
-      {state === "success" && rows.length > 0 && (
+      {authState === "authenticated" && state === "success" && rows.length > 0 && (
         <section className="space-y-3">
           <p className="text-xs text-slate-400">
             Showing {rows.length} submissions
@@ -406,3 +515,4 @@ export default function AdminModerationPage() {
     </main>
   );
 }
+

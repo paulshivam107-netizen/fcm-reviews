@@ -5,7 +5,7 @@ import {
   LOCAL_MOCK_REVIEW_SEEDS,
   shouldUseLocalMockData,
 } from "@/lib/local-mock-data";
-import { requireAdminToken } from "@/lib/server/admin-auth";
+import { requireAdminSession } from "@/lib/server/admin-session";
 import { trackAppEvent } from "@/lib/server/analytics";
 import { supabaseRestRequest, supabaseRpcRequest } from "@/lib/server/supabase-admin";
 import {
@@ -123,7 +123,7 @@ function toQueueResponse(
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAdminToken(request);
+  const auth = requireAdminSession(request);
   if (!auth.ok) return auth.response;
 
   const status = parseStatus(request.nextUrl.searchParams.get("status"));
@@ -242,7 +242,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = requireAdminToken(request);
+  const auth = requireAdminSession(request);
   if (!auth.ok) return auth.response;
 
   try {
@@ -364,4 +364,3 @@ export async function PATCH(request: NextRequest) {
     );
   }
 }
-

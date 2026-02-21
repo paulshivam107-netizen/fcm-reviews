@@ -28,7 +28,8 @@ Set:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` (preferred for server API route)
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional fallback)
-- `ADMIN_API_TOKEN` (required for moderation API/UI access)
+- `ADMIN_ALLOWLIST_EMAILS` (comma-separated admin emails)
+- `ADMIN_SESSION_SECRET` (server-only secret for signed admin session cookies)
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
 - `REVIEW_CAPTCHA_REQUIRED` (`true` in production recommended)
@@ -65,7 +66,8 @@ npm run dev
   - near-duplicate review detection for same player
 - Moderation console:
   - `/admin/moderation`
-  - approve/reject pending submissions via `ADMIN_API_TOKEN`
+  - admin login via Supabase email/password
+  - server-side allowlist + signed admin session cookie
 - Card insight panel:
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)
