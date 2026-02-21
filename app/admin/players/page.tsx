@@ -601,7 +601,7 @@ export default function AdminPlayersPage() {
           {rows.map((row) => {
             const draft = editById[row.playerId];
             const actionState = actionById[row.playerId];
-            const isBusy = actionState !== null;
+            const isBusy = actionState === "saving" || actionState === "deleting";
             return (
               <article
                 key={row.playerId}
