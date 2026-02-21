@@ -31,6 +31,8 @@ Set:
 - `ADMIN_API_TOKEN` (required for moderation API/UI access)
 - `REVIEW_FINGERPRINT_SALT` (used to hash anonymous submitter fingerprint)
 - `REVIEW_AUTO_APPROVE` (`false` by default; set `true` only if moderation is skipped)
+- `REVIEW_CAPTCHA_REQUIRED` (`true` in production recommended)
+- `TURNSTILE_SECRET_KEY` + `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (Cloudflare Turnstile)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 - `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
 - `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; enable UI ad placeholders when ready)
@@ -59,6 +61,8 @@ npm run dev
   - pending moderation by default
   - optional username attribution (`reddit` or `in-game`)
   - 5 submissions max per 24h per submitter fingerprint
+  - Turnstile captcha + honeypot trap
+  - near-duplicate review detection for same player
 - Moderation console:
   - `/admin/moderation`
   - approve/reject pending submissions via `ADMIN_API_TOKEN`

@@ -1,6 +1,13 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
 import { parsePlayerSearch } from "@/lib/search";
@@ -25,6 +32,7 @@ type ReviewFormState = {
   pros: string[];
   cons: string[];
   note: string;
+  honeypot: string;
   submittedUsername: string;
   submittedUsernameType: SubmittedUsernameType | "";
 };
@@ -48,6 +56,7 @@ const ATTRIBUTE_TAGS = [
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
 const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
@@ -123,6 +132,7 @@ function buildInitialReviewForm(player: PlayerRow): ReviewFormState {
     pros: [],
     cons: [],
     note: "",
+    honeypot: "",
     submittedUsername: "",
     submittedUsernameType: "",
   };
@@ -156,6 +166,116 @@ function LoadingCards() {
       ))}
     </div>
   );
+}
+
+type TurnstileApi = {
+  render: (
+    container: string | HTMLElement,
+    options: {
+      sitekey: string;
+      callback?: (token: string) => void;
+      "expired-callback"?: () => void;
+      "error-callback"?: () => void;
+      theme?: "light" | "dark" | "auto";
+    }
+  ) => string;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+function TurnstileField({
+  siteKey,
+  onTokenChange,
+}: {
+  siteKey: string;
+  onTokenChange: (token: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!siteKey) {
+      onTokenChange("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const ensureScript = () =>
+      new Promise<void>((resolve, reject) => {
+        if (window.turnstile) {
+          resolve();
+          return;
+        }
+
+        const existing = document.querySelector<HTMLScriptElement>(
+          "script[data-turnstile='true']"
+        );
+        if (existing) {
+          existing.addEventListener("load", () => resolve(), { once: true });
+          existing.addEventListener(
+            "error",
+            () => reject(new Error("Failed to load Turnstile script.")),
+            { once: true }
+          );
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src =
+          "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        script.dataset.turnstile = "true";
+        script.onload = () => resolve();
+        script.onerror = () =>
+          reject(new Error("Failed to load Turnstile script."));
+        document.head.appendChild(script);
+      });
+
+    async function mountWidget() {
+      try {
+        await ensureScript();
+        if (cancelled || !containerRef.current || !window.turnstile) return;
+
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          callback: (token) => onTokenChange(token),
+          "expired-callback": () => onTokenChange(""),
+          "error-callback": () => onTokenChange(""),
+          theme: "dark",
+        });
+      } catch {
+        onTokenChange("");
+      }
+    }
+
+    mountWidget();
+
+    return () => {
+      cancelled = true;
+      const widgetId = widgetIdRef.current;
+      if (widgetId && window.turnstile) {
+        window.turnstile.remove(widgetId);
+      }
+      widgetIdRef.current = null;
+    };
+  }, [siteKey, onTokenChange]);
+
+  if (!siteKey) {
+    return (
+      <p className="text-[11px] text-slate-500">
+        Captcha is disabled for local environment.
+      </p>
+    );
+  }
+
+  return <div ref={containerRef} />;
 }
 
 function AdSlot({
@@ -446,6 +566,8 @@ export default function HomePage() {
   const [reviewForm, setReviewForm] = useState<ReviewFormState | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaRenderKey, setCaptchaRenderKey] = useState(0);
   const [insightReviews, setInsightReviews] = useState<PlayerReviewFeedItem[]>([]);
   const [insightReviewsState, setInsightReviewsState] = useState<FetchState>("idle");
   const [insightReviewsError, setInsightReviewsError] = useState<string | null>(null);
@@ -584,6 +706,8 @@ export default function HomePage() {
     setSelectedPlayer(player);
     setReviewForm(buildInitialReviewForm(player));
     setReviewFeedback(null);
+    setCaptchaToken("");
+    setCaptchaRenderKey((current) => current + 1);
   };
 
   const onSelectPlayerForInsights = (player: PlayerRow) => {
@@ -610,6 +734,7 @@ export default function HomePage() {
     setSelectedPlayer(null);
     setReviewForm(null);
     setReviewFeedback(null);
+    setCaptchaToken("");
   };
 
   const onChangeReviewField =
@@ -696,6 +821,14 @@ export default function HomePage() {
       return;
     }
 
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setReviewFeedback({
+        kind: "error",
+        message: "Please complete the captcha before submitting.",
+      });
+      return;
+    }
+
     setIsSubmittingReview(true);
     setReviewFeedback(null);
 
@@ -713,6 +846,8 @@ export default function HomePage() {
           pros: reviewForm.pros,
           cons: reviewForm.cons,
           note: reviewForm.note || null,
+          honeypot: reviewForm.honeypot || null,
+          captchaToken: captchaToken || null,
           submittedUsername: reviewForm.submittedUsername || null,
           submittedUsernameType: reviewForm.submittedUsernameType || null,
         }),
@@ -736,6 +871,8 @@ export default function HomePage() {
         message: payload.message ?? "Review submitted and pending moderation.",
       });
       setReviewForm(buildInitialReviewForm(selectedPlayer));
+      setCaptchaToken("");
+      setCaptchaRenderKey((current) => current + 1);
     } catch {
       setReviewFeedback({
         kind: "error",
@@ -892,7 +1029,7 @@ export default function HomePage() {
             </button>
           </div>
 
-          <form onSubmit={onSubmitReview} className="space-y-4">
+          <form onSubmit={onSubmitReview} className="relative space-y-4">
             <label className="block text-xs text-slate-300">
               Player
               <select
@@ -1049,6 +1186,27 @@ export default function HomePage() {
                 className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
               />
             </label>
+
+            <div aria-hidden className="pointer-events-none absolute -left-[9999px] top-auto h-0 w-0 overflow-hidden opacity-0">
+              <label htmlFor="website-field">Website</label>
+              <input
+                id="website-field"
+                type="text"
+                autoComplete="off"
+                tabIndex={-1}
+                value={reviewForm.honeypot}
+                onChange={onChangeReviewField("honeypot")}
+              />
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+              <p className="mb-2 text-xs text-slate-300">Spam protection</p>
+              <TurnstileField
+                key={captchaRenderKey}
+                siteKey={TURNSTILE_SITE_KEY}
+                onTokenChange={setCaptchaToken}
+              />
+            </div>
 
             {reviewFeedback && (
               <div

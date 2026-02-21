@@ -5,6 +5,7 @@ import {
   LOCAL_MOCK_REVIEW_SEEDS,
   shouldUseLocalMockData,
 } from "@/lib/local-mock-data";
+import { trackAppEvent } from "@/lib/server/analytics";
 import {
   ReviewSubmissionRequest,
   ReviewSubmissionResponse,
@@ -16,6 +17,9 @@ const MAX_PROS = 3;
 const MAX_CONS = 2;
 const MAX_SUBMISSIONS_PER_24H = 5;
 const MAX_USERNAME_LENGTH = 32;
+const DUPLICATE_LOOKBACK_HOURS = 72;
+const CAPTCHA_VERIFY_URL =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 type LocalSubmission = {
   id: string;
@@ -23,6 +27,7 @@ type LocalSubmission = {
   submission_fingerprint: string;
   submitted_at: string;
   status: "pending" | "approved";
+  note: string | null;
 };
 
 declare global {
@@ -151,6 +156,100 @@ function sanitizeTagArray(
   return out;
 }
 
+function normalizeNoteForDuplicate(value: string | null | undefined) {
+  const text = String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text;
+}
+
+function noteTokenSimilarity(a: string, b: string) {
+  const tokensA = new Set(a.split(" ").filter((token) => token.length > 2));
+  const tokensB = new Set(b.split(" ").filter((token) => token.length > 2));
+  if (!tokensA.size || !tokensB.size) return 0;
+
+  let overlap = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) overlap += 1;
+  }
+
+  const minSize = Math.min(tokensA.size, tokensB.size);
+  return minSize === 0 ? 0 : overlap / minSize;
+}
+
+function isNearDuplicateNote(candidate: string | null, existing: string | null) {
+  const normalizedCandidate = normalizeNoteForDuplicate(candidate);
+  const normalizedExisting = normalizeNoteForDuplicate(existing);
+  if (!normalizedCandidate || !normalizedExisting) return false;
+
+  if (normalizedCandidate === normalizedExisting) return true;
+  if (
+    normalizedCandidate.length >= 40 &&
+    (normalizedCandidate.includes(normalizedExisting) ||
+      normalizedExisting.includes(normalizedCandidate))
+  ) {
+    return true;
+  }
+
+  return noteTokenSimilarity(normalizedCandidate, normalizedExisting) >= 0.82;
+}
+
+function isCaptchaRequired() {
+  const raw = String(
+    process.env.REVIEW_CAPTCHA_REQUIRED ??
+      (process.env.NODE_ENV === "production" ? "true" : "false")
+  )
+    .trim()
+    .toLowerCase();
+  return raw !== "false";
+}
+
+async function verifyTurnstileToken(args: {
+  token: string;
+  ip: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
+  if (!secret) {
+    return { ok: !isCaptchaRequired(), reason: "Captcha is not configured" };
+  }
+
+  const form = new URLSearchParams();
+  form.set("secret", secret);
+  form.set("response", args.token);
+  if (args.ip && args.ip !== "unknown") {
+    form.set("remoteip", args.ip);
+  }
+
+  const response = await fetch(CAPTCHA_VERIFY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return { ok: false, reason: "Captcha verification failed" };
+  }
+
+  const payload = (await response.json()) as {
+    success?: boolean;
+    "error-codes"?: string[];
+  };
+  if (!payload.success) {
+    const reason = Array.isArray(payload["error-codes"])
+      ? payload["error-codes"].join(", ")
+      : "invalid-token";
+    return { ok: false, reason };
+  }
+
+  return { ok: true };
+}
+
 function getSupabaseConfig() {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, "");
   const supabaseKey =
@@ -242,6 +341,7 @@ function getLocalSubmissionStore(): LocalSubmission[] {
     submission_fingerprint: "seed",
     submitted_at: seed.submitted_at,
     status: seed.status,
+    note: seed.note ?? null,
   }));
 
   return globalThis.__fcmLocalReviewSubmissions;
@@ -250,6 +350,19 @@ function getLocalSubmissionStore(): LocalSubmission[] {
 export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as ReviewSubmissionRequest;
+    const honeypot = String(payload.honeypot ?? "").trim();
+    if (honeypot) {
+      const decoyResponse: ReviewSubmissionResponse = {
+        success: true,
+        status: "pending",
+        submissionId: randomUUID(),
+        refreshed: false,
+        message: "Review submitted and pending moderation.",
+      };
+      return NextResponse.json(decoyResponse, { status: 201 });
+    }
+
+    const captchaToken = String(payload.captchaToken ?? "").trim();
 
     const playerId = String(payload.playerId ?? "").trim();
     if (!isUuidLike(playerId)) {
@@ -324,6 +437,9 @@ export async function POST(request: NextRequest) {
 
     const { ip, userAgent, fingerprint } = getClientIdentity(request);
     const throttleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const duplicateCutoff = new Date(
+      Date.now() - DUPLICATE_LOOKBACK_HOURS * 60 * 60 * 1000
+    ).toISOString();
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -332,6 +448,24 @@ export async function POST(request: NextRequest) {
     const autoApprove =
       String(process.env.REVIEW_AUTO_APPROVE ?? "false").toLowerCase() === "true";
     const status: "approved" | "pending" = autoApprove ? "approved" : "pending";
+
+    if (!captchaToken && isCaptchaRequired()) {
+      return NextResponse.json(
+        { error: "Captcha verification is required." },
+        { status: 400 }
+      );
+    }
+
+    if (captchaToken || isCaptchaRequired()) {
+      const captchaCheck = await verifyTurnstileToken({ token: captchaToken, ip });
+      if (!captchaCheck.ok) {
+        const generic =
+          captchaCheck.reason === "Captcha is not configured"
+            ? "Captcha is not configured on server."
+            : "Captcha verification failed.";
+        return NextResponse.json({ error: generic }, { status: 400 });
+      }
+    }
 
     if (useLocalMockData) {
       const store = getLocalSubmissionStore();
@@ -357,6 +491,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Player not found" }, { status: 404 });
       }
 
+      const recentPlayerNotes = store.filter(
+        (row) => row.player_id === playerId && row.submitted_at >= duplicateCutoff
+      );
+      const hasNearDuplicate = recentPlayerNotes.some((row) =>
+        isNearDuplicateNote(note, row.note)
+      );
+      if (hasNearDuplicate) {
+        return NextResponse.json(
+          {
+            error:
+              "This review looks too similar to a recent submission for the same player. Please add unique context.",
+          },
+          { status: 409 }
+        );
+      }
+
       const submissionId = randomUUID();
       store.push({
         id: submissionId,
@@ -364,6 +514,7 @@ export async function POST(request: NextRequest) {
         submission_fingerprint: fingerprint,
         submitted_at: new Date().toISOString(),
         status,
+        note,
       });
 
       const response: ReviewSubmissionResponse = {
@@ -376,6 +527,13 @@ export async function POST(request: NextRequest) {
             ? "Review submitted successfully."
             : "Review submitted and pending moderation.",
       };
+
+      await trackAppEvent({
+        eventType: "review_submitted",
+        playerId,
+        metadata: { source: "local-mock", status },
+        request,
+      });
 
       return NextResponse.json(response, { status: 201 });
     }
@@ -406,6 +564,40 @@ export async function POST(request: NextRequest) {
           error: `Submission limit reached. You can submit up to ${MAX_SUBMISSIONS_PER_24H} reviews in 24 hours.`,
         },
         { status: 429 }
+      );
+    }
+
+    const duplicateResponse = await supabaseRest("user_review_submissions", {
+      method: "GET",
+      query: {
+        select: "note",
+        player_id: `eq.${playerId}`,
+        submitted_at: `gte.${duplicateCutoff}`,
+        note: "not.is.null",
+        order: "submitted_at.desc",
+        limit: "40",
+      },
+    });
+
+    if (!duplicateResponse.ok) {
+      const details = await duplicateResponse.text();
+      return NextResponse.json(
+        { error: "Duplicate check failed", details: details.slice(0, 500) },
+        { status: 500 }
+      );
+    }
+
+    const recentNotes = (await duplicateResponse.json()) as Array<{ note: string | null }>;
+    const hasNearDuplicate = recentNotes.some((row) =>
+      isNearDuplicateNote(note, row.note)
+    );
+    if (hasNearDuplicate) {
+      return NextResponse.json(
+        {
+          error:
+            "This review looks too similar to a recent submission for the same player. Please add unique context.",
+        },
+        { status: 409 }
       );
     }
 
@@ -498,6 +690,13 @@ export async function POST(request: NextRequest) {
           ? "Review submitted successfully."
           : "Review submitted and pending moderation.",
     };
+
+    await trackAppEvent({
+      eventType: "review_submitted",
+      playerId,
+      metadata: { source: "supabase", status: resolvedStatus, refreshed },
+      request,
+    });
 
     return NextResponse.json(response, { status: 201 });
   } catch (error) {

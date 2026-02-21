@@ -8,6 +8,8 @@ export type ReviewSubmissionRequest = {
   pros?: string[];
   cons?: string[];
   note?: string;
+  honeypot?: string | null;
+  captchaToken?: string | null;
   submittedUsername?: string | null;
   submittedUsernameType?: SubmittedUsernameType | null;
 };
