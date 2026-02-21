@@ -1109,7 +1109,7 @@ export default function HomePage() {
               className={[
                 "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
                 active
-                  ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
+                  ? "tab-active-glow bg-accent-500 text-slate-950"
                   : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
               ].join(" ")}
             >
