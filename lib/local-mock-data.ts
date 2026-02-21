@@ -54,21 +54,6 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
     last_processed_at: "2026-02-21T01:40:00.000Z",
   },
   {
-    player_id: "0f6c7ec2-9fe0-43bd-9bf7-7419ebf7a003",
-    player_name: "Rodri",
-    base_ovr: 116,
-    base_position: "CDM",
-    program_promo: "UTOTY",
-    mention_count: 38,
-    avg_sentiment_score: 8.8,
-    top_pros: [
-      { text: "positioning", count: 22 },
-      { text: "passing", count: 20 },
-    ],
-    top_cons: [{ text: "pace", count: 11 }],
-    last_processed_at: "2026-02-20T19:00:00.000Z",
-  },
-  {
     player_id: "0f6c7ec2-9fe0-43bd-9bf7-7419ebf7a006",
     player_name: "Michael Essien",
     base_ovr: 116,
@@ -83,21 +68,6 @@ export const LOCAL_MOCK_PLAYERS: PlayerRow[] = [
       { text: "3 star skill move", count: 7 },
     ],
     last_processed_at: "2026-02-21T01:10:00.000Z",
-  },
-  {
-    player_id: "0f6c7ec2-9fe0-43bd-9bf7-7419ebf7a004",
-    player_name: "Virgil van Dijk",
-    base_ovr: 118,
-    base_position: "CB",
-    program_promo: "TOTY",
-    mention_count: 43,
-    avg_sentiment_score: 9.1,
-    top_pros: [
-      { text: "physical", count: 31 },
-      { text: "defending", count: 27 },
-    ],
-    top_cons: [{ text: "turning", count: 9 }],
-    last_processed_at: "2026-02-20T19:00:00.000Z",
   },
   {
     player_id: "0f6c7ec2-9fe0-43bd-9bf7-7419ebf7a005",

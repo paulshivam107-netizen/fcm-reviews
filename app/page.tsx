@@ -43,6 +43,7 @@ const ATTRIBUTE_TAGS = [
 
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
+const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
@@ -141,6 +142,31 @@ function LoadingCards() {
         />
       ))}
     </div>
+  );
+}
+
+function AdSlot({
+  placement,
+  className,
+}: {
+  placement: string;
+  className?: string;
+}) {
+  if (!ADS_ENABLED) return null;
+
+  return (
+    <aside
+      aria-label={`Ad slot ${placement}`}
+      className={[
+        "glass-panel rounded-2xl border border-dashed border-white/20 px-4 py-4 text-center",
+        className ?? "",
+      ].join(" ")}
+    >
+      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
+        Sponsored Placement
+      </p>
+      <p className="mt-1 text-xs text-slate-300">{placement}</p>
+    </aside>
   );
 }
 
@@ -639,6 +665,8 @@ export default function HomePage() {
         </div>
       </form>
 
+      <AdSlot placement="Top Banner (320x50 / 300x250)" className="mb-5" />
+
       <nav
         className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto pb-2"
         aria-label="Player role tabs"
@@ -693,6 +721,9 @@ export default function HomePage() {
                   onClose={() => setSelectedInsightPlayer(null)}
                   onAddReview={onSelectPlayerForReview}
                 />
+              )}
+              {index === 2 && (
+                <AdSlot placement="In-feed (300x250)" className="mt-3" />
               )}
             </div>
           ))}
@@ -902,6 +933,8 @@ export default function HomePage() {
           </form>
         </section>
       )}
+
+      <AdSlot placement="Footer Sticky (320x50)" className="mt-6" />
     </main>
   );
 }
