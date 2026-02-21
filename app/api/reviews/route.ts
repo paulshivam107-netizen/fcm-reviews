@@ -5,6 +5,7 @@ import {
   LOCAL_MOCK_REVIEW_SEEDS,
   shouldUseLocalMockData,
 } from "@/lib/local-mock-data";
+import { sanitizeReviewTagArray } from "@/lib/review-attributes";
 import { trackAppEvent } from "@/lib/server/analytics";
 import {
   ReviewSubmissionRequest,
@@ -59,28 +60,6 @@ const COMMON_POSITIONS = new Set([
   "LWB",
   "RWB",
   "GK",
-]);
-
-const PRO_TAGS = new Set([
-  "Pace",
-  "Finishing",
-  "Dribbling",
-  "Passing",
-  "Physical",
-  "Positioning",
-  "Weak Foot",
-  "Long Shots",
-]);
-
-const CON_TAGS = new Set([
-  "Pace",
-  "Finishing",
-  "Dribbling",
-  "Passing",
-  "Physical",
-  "Positioning",
-  "Weak Foot",
-  "Long Shots",
 ]);
 
 function normalizePosition(value: string | null | undefined) {
@@ -143,33 +122,6 @@ function isValidSubmittedUsername(
   }
 
   return /^(?=.{2,32}$)[A-Za-z0-9][A-Za-z0-9._ -]*$/.test(username);
-}
-
-function sanitizeTagArray(
-  tags: unknown,
-  allowed: Set<string>,
-  max: number
-): string[] {
-  if (!Array.isArray(tags)) return [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const canonical = new Map(
-    [...allowed].map((item) => [item.toLowerCase(), item])
-  );
-
-  for (const item of tags) {
-    const cleaned = String(item ?? "").trim();
-    const key = cleaned.toLowerCase();
-    const normalized = canonical.get(key);
-    if (!normalized) continue;
-    if (seen.has(key)) continue;
-
-    seen.add(key);
-    out.push(normalized);
-    if (out.length >= max) break;
-  }
-
-  return out;
 }
 
 function normalizeNoteForDuplicate(value: string | null | undefined) {
@@ -424,8 +376,16 @@ export async function POST(request: NextRequest) {
     }
 
     const mentionedRankText = normalizeRank(payload.mentionedRankText);
-    const pros = sanitizeTagArray(payload.pros, PRO_TAGS, MAX_PROS);
-    const cons = sanitizeTagArray(payload.cons, CON_TAGS, MAX_CONS);
+    const pros = sanitizeReviewTagArray({
+      tags: payload.pros,
+      position: playedPosition,
+      max: MAX_PROS,
+    });
+    const cons = sanitizeReviewTagArray({
+      tags: payload.cons,
+      position: playedPosition,
+      max: MAX_CONS,
+    });
     const note = String(payload.note ?? "").trim().slice(0, MAX_NOTE_LENGTH) || null;
 
     const submittedUsername = normalizeUsername(payload.submittedUsername);
