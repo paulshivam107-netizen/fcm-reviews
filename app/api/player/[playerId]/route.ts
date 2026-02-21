@@ -120,18 +120,24 @@ export async function GET(
       if (rows.length > 0) {
         const summaryRow = rows[0];
         if (!hasReviewSignal(summaryRow)) {
-          const localByIdentity = findLocalMockPlayerByIdentity({
-            playerName: summaryRow.player_name,
-            baseOvr: summaryRow.base_ovr,
-            programPromo: summaryRow.program_promo,
-          });
-          if (localByIdentity) {
-            return buildResponse({
-              item: localByIdentity,
-              cacheControl: "no-store",
-              dataSource: "local-mock-fallback",
+          if (allowMockFallback) {
+            const localByIdentity = findLocalMockPlayerByIdentity({
+              playerName: summaryRow.player_name,
+              baseOvr: summaryRow.base_ovr,
+              programPromo: summaryRow.program_promo,
             });
+            if (localByIdentity) {
+              return buildResponse({
+                item: localByIdentity,
+                cacheControl: "no-store",
+                dataSource: "local-mock-fallback",
+              });
+            }
           }
+          return NextResponse.json(
+            { error: "Player has no approved reviews yet" },
+            { status: 404 }
+          );
         }
 
         return buildResponse({
@@ -192,7 +198,7 @@ export async function GET(
       baseOvr: baseRow.base_ovr,
       programPromo: baseRow.program_promo,
     });
-    if (localByIdentity) {
+    if (allowMockFallback && localByIdentity) {
       return buildResponse({
         item: localByIdentity,
         cacheControl: "no-store",
@@ -200,22 +206,10 @@ export async function GET(
       });
     }
 
-    return buildResponse({
-      item: {
-        player_id: baseRow.id,
-        player_name: baseRow.player_name,
-        base_ovr: baseRow.base_ovr,
-        base_position: baseRow.base_position,
-        program_promo: baseRow.program_promo,
-        mention_count: 0,
-        avg_sentiment_score: null,
-        top_pros: [],
-        top_cons: [],
-        last_processed_at: null,
-      },
-      cacheControl: "s-maxage=300, stale-while-revalidate=3600",
-      dataSource: "supabase",
-    });
+    return NextResponse.json(
+      { error: "Player has no approved reviews yet" },
+      { status: 404 }
+    );
   } catch (error) {
     if (allowMockFallback && localItem) {
       return buildResponse({

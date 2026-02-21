@@ -282,14 +282,16 @@ export async function GET(request: NextRequest) {
       .slice(0, limit);
 
     if (mergedRows.length === 0) {
-      const directMockRows = getFallbackRows(playerId, limit);
-      if (directMockRows.length > 0) {
-        return buildResponse({
-          playerId,
-          items: directMockRows,
-          cacheControl: "no-store",
-          dataSource: "local-mock-fallback",
-        });
+      if (allowMockFallback) {
+        const directMockRows = getFallbackRows(playerId, limit);
+        if (directMockRows.length > 0) {
+          return buildResponse({
+            playerId,
+            items: directMockRows,
+            cacheControl: "no-store",
+            dataSource: "local-mock-fallback",
+          });
+        }
       }
 
       const playersUrl = new URL(`${baseUrl}/rest/v1/players`);
@@ -312,7 +314,7 @@ export async function GET(request: NextRequest) {
       if (playerIdentityResponse.ok) {
         const identityRows = (await playerIdentityResponse.json()) as SupabasePlayerIdentityRow[];
         const identityRow = identityRows[0];
-        if (identityRow) {
+        if (allowMockFallback && identityRow) {
           const localByIdentity = findLocalMockPlayerByIdentity({
             playerName: identityRow.player_name,
             baseOvr: identityRow.base_ovr,
