@@ -8,6 +8,9 @@ import {
 } from "@/lib/review-attributes";
 import {
   AdminArchiveStaleResponse,
+  AdminPlayerMergeExecuteResponse,
+  AdminPlayerMergePreview,
+  AdminPlayerMergePreviewResponse,
   AdminManualReviewResponse,
   AdminPlayerItem,
   AdminPlayerMutationResponse,
@@ -38,6 +41,8 @@ type ManualReviewDraft = {
   cons: string[];
   note: string;
 };
+
+type MergeActionState = "idle" | "loading-targets" | "previewing" | "merging";
 
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 
@@ -104,6 +109,14 @@ export default function AdminPlayersPage() {
     buildInitialManualReviewDraft()
   );
   const [isSubmittingManualReview, setIsSubmittingManualReview] = useState(false);
+  const [mergeSource, setMergeSource] = useState<AdminPlayerItem | null>(null);
+  const [mergeTargetQuery, setMergeTargetQuery] = useState("");
+  const [mergeTargetRows, setMergeTargetRows] = useState<AdminPlayerItem[]>([]);
+  const [mergeTargetId, setMergeTargetId] = useState<string>("");
+  const [mergePreview, setMergePreview] = useState<AdminPlayerMergePreview | null>(
+    null
+  );
+  const [mergeActionState, setMergeActionState] = useState<MergeActionState>("idle");
 
   const loadPlayers = useCallback(async () => {
     if (authState !== "authenticated") {
@@ -199,6 +212,10 @@ export default function AdminPlayersPage() {
     () => getReviewTagsForPosition(manualReview.playedPosition),
     [manualReview.playedPosition]
   );
+  const selectedMergeTarget = useMemo(
+    () => mergeTargetRows.find((row) => row.playerId === mergeTargetId) ?? null,
+    [mergeTargetRows, mergeTargetId]
+  );
 
   const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -258,6 +275,177 @@ export default function AdminPlayersPage() {
       setIsManualReviewOpen(false);
       setManualReview(buildInitialManualReviewDraft());
       setIsSubmittingManualReview(false);
+      setMergeSource(null);
+      setMergeTargetQuery("");
+      setMergeTargetRows([]);
+      setMergeTargetId("");
+      setMergePreview(null);
+      setMergeActionState("idle");
+    }
+  };
+
+  const resetMergeState = () => {
+    setMergeSource(null);
+    setMergeTargetQuery("");
+    setMergeTargetRows([]);
+    setMergeTargetId("");
+    setMergePreview(null);
+    setMergeActionState("idle");
+  };
+
+  const searchMergeTargets = async (source: AdminPlayerItem, rawQuery: string) => {
+    const cleanedQuery = rawQuery.trim() || source.playerName;
+    setMergeActionState("loading-targets");
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({
+        q: cleanedQuery,
+        limit: "40",
+        includeInactive: "false",
+      });
+      const response = await fetch(`/api/admin/players?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = payload as AdminPlayersListResponse;
+      const candidates = data.items
+        .filter((item) => item.playerId !== source.playerId)
+        .sort((a, b) => b.mentionCount - a.mentionCount);
+
+      setMergeTargetRows(candidates);
+      if (!candidates.some((item) => item.playerId === mergeTargetId)) {
+        setMergeTargetId("");
+        setMergePreview(null);
+      }
+    } catch (searchError) {
+      setMergeTargetRows([]);
+      setMergeTargetId("");
+      setMergePreview(null);
+      setError(
+        searchError instanceof Error
+          ? searchError.message
+          : "Failed to search merge targets."
+      );
+    } finally {
+      setMergeActionState("idle");
+    }
+  };
+
+  const openMergePanel = async (source: AdminPlayerItem) => {
+    setMergeSource(source);
+    setMergeTargetQuery(source.playerName);
+    setMergeTargetRows([]);
+    setMergeTargetId("");
+    setMergePreview(null);
+    setFeedback(null);
+    await searchMergeTargets(source, source.playerName);
+  };
+
+  const previewMerge = async () => {
+    if (!mergeSource || !mergeTargetId) {
+      setError("Select a target card first.");
+      return;
+    }
+
+    setMergeActionState("previewing");
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({
+        sourcePlayerId: mergeSource.playerId,
+        targetPlayerId: mergeTargetId,
+      });
+      const response = await fetch(`/api/admin/players/merge?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as
+        | AdminPlayerMergePreviewResponse
+        | { error?: string };
+      if (!response.ok) {
+        const message =
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const previewPayload = payload as AdminPlayerMergePreviewResponse;
+      setMergePreview(previewPayload.preview);
+    } catch (previewError) {
+      setMergePreview(null);
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Failed to preview merge."
+      );
+    } finally {
+      setMergeActionState("idle");
+    }
+  };
+
+  const executeMerge = async () => {
+    if (!mergeSource || !mergeTargetId) {
+      setError("Select a target card first.");
+      return;
+    }
+    if (!mergePreview) {
+      setError("Preview the merge before confirming.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Merge "${mergeSource.playerName} ${mergeSource.baseOvr}" into "${mergePreview.targetPlayer.playerName} ${mergePreview.targetPlayer.baseOvr}"? Source card will be archived.`
+    );
+    if (!confirmed) return;
+
+    setMergeActionState("merging");
+    setError(null);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/admin/players/merge", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourcePlayerId: mergeSource.playerId,
+          targetPlayerId: mergeTargetId,
+        }),
+      });
+      const payload = (await response.json()) as
+        | AdminPlayerMergeExecuteResponse
+        | { error?: string };
+      if (!response.ok) {
+        const message =
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const summary = (payload as AdminPlayerMergeExecuteResponse).summary;
+      setFeedback(
+        `Merge complete. Moved ${summary.movedMentionsCount} mentions and ${summary.movedUserReviewsCount} user reviews.`
+      );
+      resetMergeState();
+      await loadPlayers();
+    } catch (mergeError) {
+      setError(mergeError instanceof Error ? mergeError.message : "Merge failed.");
+    } finally {
+      setMergeActionState("idle");
     }
   };
 
@@ -957,6 +1145,166 @@ export default function AdminPlayersPage() {
               </button>
             </form>
           </section>
+
+          {mergeSource && (
+            <section className="glass-panel mb-5 rounded-2xl border border-amber-300/25 p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.1em] text-amber-100">
+                    Merge Cards
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    Move mentions and user reviews from source to target, then archive source.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetMergeState}
+                  className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
+                Source:{" "}
+                <span className="font-semibold text-slate-100">
+                  {mergeSource.playerName} · {mergeSource.baseOvr} · {mergeSource.basePosition}
+                </span>{" "}
+                <span className="text-slate-400">({mergeSource.programPromo})</span>
+              </div>
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void searchMergeTargets(mergeSource, mergeTargetQuery);
+                }}
+                className="grid grid-cols-[1fr_auto] items-end gap-3"
+              >
+                <label className="text-xs text-slate-300">
+                  Search target card
+                  <input
+                    type="search"
+                    value={mergeTargetQuery}
+                    onChange={(event) => setMergeTargetQuery(event.target.value)}
+                    placeholder='Try "Raul 115" or "Glorious Eras"'
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={mergeActionState !== "idle"}
+                  className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {mergeActionState === "loading-targets" ? "Searching..." : "Search"}
+                </button>
+              </form>
+
+              <div className="mt-3 space-y-2">
+                {mergeTargetRows.length === 0 && (
+                  <p className="text-xs text-slate-400">
+                    No active target cards found for this query.
+                  </p>
+                )}
+                {mergeTargetRows.map((target) => (
+                  <label
+                    key={target.playerId}
+                    className={[
+                      "flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2 text-xs transition",
+                      target.playerId === mergeTargetId
+                        ? "border-lime-300/35 bg-lime-300/12 text-lime-100"
+                        : "border-white/15 bg-white/5 text-slate-200 hover:bg-white/10",
+                    ].join(" ")}
+                  >
+                    <div>
+                      <p className="font-semibold">
+                        {target.playerName} · {target.baseOvr} · {target.basePosition}
+                      </p>
+                      <p className="text-slate-400">
+                        {target.programPromo} · Mentions {target.mentionCount}
+                      </p>
+                    </div>
+                    <input
+                      type="radio"
+                      name="merge-target-card"
+                      checked={target.playerId === mergeTargetId}
+                      onChange={() => {
+                        setMergeTargetId(target.playerId);
+                        setMergePreview(null);
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!mergeTargetId || mergeActionState !== "idle"}
+                  onClick={() => void previewMerge()}
+                  className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {mergeActionState === "previewing" ? "Previewing..." : "Preview Merge"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!mergePreview || mergeActionState !== "idle"}
+                  onClick={() => void executeMerge()}
+                  className="rounded-xl border border-amber-300/35 bg-amber-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {mergeActionState === "merging"
+                    ? "Merging..."
+                    : "Merge + Archive Source"}
+                </button>
+              </div>
+
+              {mergePreview && selectedMergeTarget && (
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-200">
+                  <p className="mb-2 font-semibold text-slate-100">
+                    Preview: {mergeSource.playerName} to {selectedMergeTarget.playerName}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <p>
+                      Mentions to move:{" "}
+                      <span className="font-semibold text-lime-200">
+                        {mergePreview.sourceCounts.mentionsToMove}
+                      </span>
+                    </p>
+                    <p>
+                      Mention conflicts:{" "}
+                      <span className="font-semibold text-amber-100">
+                        {mergePreview.sourceCounts.mentionConflicts}
+                      </span>
+                    </p>
+                    <p>
+                      User reviews:{" "}
+                      <span className="font-semibold text-lime-200">
+                        {mergePreview.sourceCounts.userReviewsTotal}
+                      </span>
+                    </p>
+                    <p>
+                      Pending reviews:{" "}
+                      <span className="font-semibold text-amber-100">
+                        {mergePreview.sourceCounts.userReviewsPending}
+                      </span>
+                    </p>
+                    <p>
+                      Aliases to move:{" "}
+                      <span className="font-semibold text-lime-200">
+                        {mergePreview.sourceCounts.aliasesToMove}
+                      </span>
+                    </p>
+                    <p>
+                      Alias conflicts:{" "}
+                      <span className="font-semibold text-amber-100">
+                        {mergePreview.sourceCounts.aliasConflicts}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
         </>
       )}
 
@@ -1029,6 +1377,13 @@ export default function AdminPlayersPage() {
                       >
                         View Card
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => void openMergePanel(row)}
+                        className="rounded-xl border border-amber-300/35 bg-amber-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-amber-100 transition hover:bg-amber-300/20"
+                      >
+                        Merge
+                      </button>
                       <button
                         type="button"
                         onClick={() => startEdit(row)}
