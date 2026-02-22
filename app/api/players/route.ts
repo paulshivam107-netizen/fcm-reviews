@@ -6,19 +6,26 @@ import { PlayerRow, PlayerTab } from "@/types/player";
 
 const MV_FIELDS = [
   "player_id",
-  "player_name",
-  "base_ovr",
-  "base_position",
-  "program_promo",
   "mention_count",
   "avg_sentiment_score",
   "top_pros",
   "top_cons",
   "last_processed_at",
 ].join(",");
+const PLAYER_FIELDS = [
+  "id",
+  "player_name",
+  "base_ovr",
+  "base_position",
+  "program_promo",
+  "updated_at",
+].join(",");
 
 const MAX_LIMIT = 60;
 const SUPABASE_REQUEST_TIMEOUT_MS = 9000;
+const MAX_IDS_PER_QUERY = 120;
+const CANDIDATE_TAB_LIMIT = 2000;
+const CANDIDATE_SEARCH_MIN_LIMIT = 180;
 
 type PlayerIdentityRow = {
   id: string;
@@ -26,6 +33,16 @@ type PlayerIdentityRow = {
   base_ovr: number;
   base_position: string;
   program_promo: string;
+  updated_at: string;
+};
+
+type MvSummaryRow = {
+  player_id: string;
+  mention_count: number | null;
+  avg_sentiment_score: number | null;
+  top_pros: PlayerRow["top_pros"];
+  top_cons: PlayerRow["top_cons"];
+  last_processed_at: string | null;
 };
 
 type ApprovedUserReviewRow = {
@@ -46,6 +63,15 @@ type ReviewFallbackAggregate = {
 
 function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
+}
+
+function chunkArray<T>(values: T[], chunkSize: number) {
+  if (chunkSize <= 0 || values.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
 }
 
 function hasReviewSignal(row: PlayerRow) {
@@ -111,7 +137,88 @@ function buildPlayersResponse(args: {
   );
 }
 
-async function hydrateLatestPlayerIdentity(args: {
+async function fetchPlayerCandidates(args: {
+  supabaseUrl: string;
+  supabaseKey: string;
+  tab: PlayerTab;
+  parsed: ReturnType<typeof parsePlayerSearch>;
+  limit: number;
+}): Promise<PlayerIdentityRow[] | null> {
+  const { supabaseUrl, supabaseKey, tab, parsed, limit } = args;
+  const hasSearchQuery = parsed.raw.trim().length > 0;
+  const isOvrOnlyQuery =
+    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
+  const queryLimit =
+    hasSearchQuery || isOvrOnlyQuery
+      ? Math.max(limit * 8, CANDIDATE_SEARCH_MIN_LIMIT)
+      : CANDIDATE_TAB_LIMIT;
+  const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/players`);
+  url.searchParams.set("select", PLAYER_FIELDS);
+  url.searchParams.set("is_active", "eq.true");
+  url.searchParams.set("order", "updated_at.desc,base_ovr.desc,player_name.asc");
+  url.searchParams.set("limit", String(queryLimit));
+
+  if (!hasSearchQuery && !isOvrOnlyQuery) {
+    url.searchParams.set("base_position", `in.(${POSITION_GROUPS[tab].join(",")})`);
+  }
+
+  if (parsed.requestedOvr !== null) {
+    url.searchParams.set("base_ovr", `eq.${parsed.requestedOvr}`);
+  }
+
+  if (parsed.nameQuery) {
+    const cleaned = sanitizeForIlike(parsed.nameQuery);
+    if (cleaned) {
+      url.searchParams.set(
+        "or",
+        `(player_name.ilike.*${cleaned}*,program_promo.ilike.*${cleaned}*,base_position.ilike.*${cleaned}*)`
+      );
+    }
+  }
+
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    SUPABASE_REQUEST_TIMEOUT_MS
+  );
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+      signal: timeoutController.signal,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as PlayerIdentityRow[];
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function buildSkeletonRows(rows: PlayerIdentityRow[]): PlayerRow[] {
+  return rows.map((row) => ({
+    player_id: row.id,
+    player_name: row.player_name,
+    base_ovr: row.base_ovr,
+    base_position: row.base_position,
+    program_promo: row.program_promo,
+    mention_count: 0,
+    avg_sentiment_score: null,
+    top_pros: [],
+    top_cons: [],
+    last_processed_at: null,
+  }));
+}
+
+async function hydrateRowsFromSummaryView(args: {
   rows: PlayerRow[];
   supabaseUrl: string;
   supabaseKey: string;
@@ -119,43 +226,48 @@ async function hydrateLatestPlayerIdentity(args: {
   const { rows, supabaseUrl, supabaseKey } = args;
   if (!rows.length) return rows;
 
-  const playerIds = Array.from(new Set(rows.map((row) => row.player_id)));
-  const playersUrl = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/players`);
-  playersUrl.searchParams.set(
-    "select",
-    "id,player_name,base_ovr,base_position,program_promo"
-  );
-  playersUrl.searchParams.set("id", `in.(${playerIds.join(",")})`);
-  playersUrl.searchParams.set("is_active", "eq.true");
+  const out = new Map(rows.map((row) => [row.player_id, row]));
+  const playerIds = Array.from(out.keys());
+  const idChunks = chunkArray(playerIds, MAX_IDS_PER_QUERY);
 
-  const identityResponse = await fetch(playersUrl, {
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-    },
-    next: { revalidate: 300 },
-  });
+  for (const chunk of idChunks) {
+    const summaryUrl = new URL(
+      `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`
+    );
+    summaryUrl.searchParams.set("select", MV_FIELDS);
+    summaryUrl.searchParams.set("player_id", `in.(${chunk.join(",")})`);
 
-  if (!identityResponse.ok) {
-    return rows;
+    const summaryResponse = await fetch(summaryUrl, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+    });
+
+    if (!summaryResponse.ok) {
+      continue;
+    }
+
+    const summaryRows = (await summaryResponse.json()) as MvSummaryRow[];
+    for (const summary of summaryRows) {
+      const current = out.get(summary.player_id);
+      if (!current) continue;
+      out.set(summary.player_id, {
+        ...current,
+        mention_count: Number(summary.mention_count ?? 0),
+        avg_sentiment_score:
+          summary.avg_sentiment_score === null
+            ? null
+            : Number(summary.avg_sentiment_score),
+        top_pros: Array.isArray(summary.top_pros) ? summary.top_pros : [],
+        top_cons: Array.isArray(summary.top_cons) ? summary.top_cons : [],
+        last_processed_at: summary.last_processed_at,
+      });
+    }
   }
 
-  const identityRows = (await identityResponse.json()) as PlayerIdentityRow[];
-  const byId = new Map(identityRows.map((row) => [row.id, row]));
-
-  return rows
-    .map((row) => {
-      const currentIdentity = byId.get(row.player_id);
-      if (!currentIdentity) return null;
-      return {
-        ...row,
-        player_name: currentIdentity.player_name,
-        base_ovr: currentIdentity.base_ovr,
-        base_position: currentIdentity.base_position,
-        program_promo: currentIdentity.program_promo,
-      };
-    })
-    .filter((row): row is PlayerRow => row !== null);
+  return rows.map((row) => out.get(row.player_id) ?? row);
 }
 
 async function hydrateSignalsFromApprovedUserReviews(args: {
@@ -166,74 +278,78 @@ async function hydrateSignalsFromApprovedUserReviews(args: {
   const { rows, supabaseUrl, supabaseKey } = args;
   if (!rows.length) return rows;
 
-  const playerIds = Array.from(new Set(rows.map((row) => row.player_id)));
-  const reviewUrl = new URL(
-    `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/user_review_submissions`
+  const unresolvedIds = Array.from(
+    new Set(rows.filter((row) => !hasReviewSignal(row)).map((row) => row.player_id))
   );
-  reviewUrl.searchParams.set(
-    "select",
-    "player_id,sentiment_score,submitted_at,pros,cons"
-  );
-  reviewUrl.searchParams.set("player_id", `in.(${playerIds.join(",")})`);
-  reviewUrl.searchParams.set("status", "eq.approved");
-  reviewUrl.searchParams.set("limit", "5000");
-
-  const reviewResponse = await fetch(reviewUrl, {
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-    },
-    next: { revalidate: 300 },
-  });
-
-  if (!reviewResponse.ok) {
-    return rows;
-  }
-
-  const reviewRows = (await reviewResponse.json()) as ApprovedUserReviewRow[];
-  if (!reviewRows.length) return rows;
+  if (!unresolvedIds.length) return rows;
 
   const aggregateByPlayer = new Map<string, ReviewFallbackAggregate>();
+  const idChunks = chunkArray(unresolvedIds, MAX_IDS_PER_QUERY);
 
-  for (const review of reviewRows) {
-    const score = Number(review.sentiment_score);
-    if (!Number.isFinite(score)) continue;
+  for (const chunk of idChunks) {
+    const reviewUrl = new URL(
+      `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/user_review_submissions`
+    );
+    reviewUrl.searchParams.set(
+      "select",
+      "player_id,sentiment_score,submitted_at,pros,cons"
+    );
+    reviewUrl.searchParams.set("player_id", `in.(${chunk.join(",")})`);
+    reviewUrl.searchParams.set("status", "eq.approved");
+    reviewUrl.searchParams.set("limit", "20000");
 
-    const current =
-      aggregateByPlayer.get(review.player_id) ??
-      ({
-        count: 0,
-        scoreSum: 0,
-        latestSubmittedAt: null,
-        pros: new Map<string, number>(),
-        cons: new Map<string, number>(),
-      } satisfies ReviewFallbackAggregate);
+    const reviewResponse = await fetch(reviewUrl, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+    });
 
-    current.count += 1;
-    current.scoreSum += score;
+    if (!reviewResponse.ok) continue;
+    const reviewRows = (await reviewResponse.json()) as ApprovedUserReviewRow[];
+    if (!reviewRows.length) continue;
 
-    if (
-      review.submitted_at &&
-      (!current.latestSubmittedAt ||
-        new Date(review.submitted_at).getTime() >
-          new Date(current.latestSubmittedAt).getTime())
-    ) {
-      current.latestSubmittedAt = review.submitted_at;
+    for (const review of reviewRows) {
+      const score = Number(review.sentiment_score);
+      if (!Number.isFinite(score)) continue;
+
+      const current =
+        aggregateByPlayer.get(review.player_id) ??
+        ({
+          count: 0,
+          scoreSum: 0,
+          latestSubmittedAt: null,
+          pros: new Map<string, number>(),
+          cons: new Map<string, number>(),
+        } satisfies ReviewFallbackAggregate);
+
+      current.count += 1;
+      current.scoreSum += score;
+
+      if (
+        review.submitted_at &&
+        (!current.latestSubmittedAt ||
+          new Date(review.submitted_at).getTime() >
+            new Date(current.latestSubmittedAt).getTime())
+      ) {
+        current.latestSubmittedAt = review.submitted_at;
+      }
+
+      for (const value of review.pros ?? []) {
+        const key = normalizeInsightTerm(String(value));
+        if (!key) continue;
+        current.pros.set(key, (current.pros.get(key) ?? 0) + 1);
+      }
+
+      for (const value of review.cons ?? []) {
+        const key = normalizeInsightTerm(String(value));
+        if (!key) continue;
+        current.cons.set(key, (current.cons.get(key) ?? 0) + 1);
+      }
+
+      aggregateByPlayer.set(review.player_id, current);
     }
-
-    for (const value of review.pros ?? []) {
-      const key = normalizeInsightTerm(String(value));
-      if (!key) continue;
-      current.pros.set(key, (current.pros.get(key) ?? 0) + 1);
-    }
-
-    for (const value of review.cons ?? []) {
-      const key = normalizeInsightTerm(String(value));
-      if (!key) continue;
-      current.cons.set(key, (current.cons.get(key) ?? 0) + 1);
-    }
-
-    aggregateByPlayer.set(review.player_id, current);
   }
 
   return rows.map((row) => {
@@ -274,11 +390,6 @@ export async function GET(request: NextRequest) {
   const allowMockFallback =
     process.env.NODE_ENV !== "production" &&
     String(process.env.USE_LOCAL_MOCK_FALLBACK ?? "false").toLowerCase() === "true";
-  const isOvrOnlyQuery =
-    parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
-  const hasSearchQuery = parsed.raw.trim().length > 0;
-  const internalFetchLimit =
-    hasSearchQuery || isOvrOnlyQuery ? limit : Math.max(limit * 4, 120);
   const getMockRows = () =>
     queryLocalMockPlayers({
       tab,
@@ -317,92 +428,47 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const url = new URL(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/mv_player_sentiment_summary`);
-  url.searchParams.set("select", MV_FIELDS);
-  if (!hasSearchQuery && !isOvrOnlyQuery) {
-    url.searchParams.set(
-      "base_position",
-      `in.(${POSITION_GROUPS[tab].join(",")})`
+  const candidateRows = await fetchPlayerCandidates({
+    supabaseUrl,
+    supabaseKey,
+    tab,
+    parsed,
+    limit,
+  });
+  if (!candidateRows) {
+    if (allowMockFallback) {
+      return buildPlayersResponse({
+        rows: getMockRows(),
+        tab,
+        parsed,
+        cacheControl: "no-store",
+        dataSource: "local-mock-fallback",
+      });
+    }
+
+    return NextResponse.json(
+      { error: "Supabase query failed", details: "Failed to load candidate players" },
+      { status: 500 }
     );
   }
-  url.searchParams.set("order", "avg_sentiment_score.desc.nullslast,mention_count.desc,base_ovr.desc");
-  url.searchParams.set("limit", String(internalFetchLimit));
-
-  if (parsed.requestedOvr !== null) {
-    url.searchParams.set("base_ovr", `eq.${parsed.requestedOvr}`);
-  }
-
-  if (parsed.nameQuery) {
-    const cleaned = sanitizeForIlike(parsed.nameQuery);
-    if (cleaned) {
-      url.searchParams.set("player_name", `ilike.*${cleaned}*`);
-    }
-  }
-
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(
-    () => timeoutController.abort(),
-    SUPABASE_REQUEST_TIMEOUT_MS
-  );
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      next: { revalidate: 300 },
-      signal: timeoutController.signal,
+  if (!candidateRows.length) {
+    return buildPlayersResponse({
+      rows: [],
+      tab,
+      parsed,
+      cacheControl: "s-maxage=300, stale-while-revalidate=3600",
+      dataSource: "supabase",
     });
-  } catch (error) {
-    if (allowMockFallback) {
-      return buildPlayersResponse({
-        rows: getMockRows(),
-        tab,
-        parsed,
-        cacheControl: "no-store",
-        dataSource: "local-mock-fallback",
-      });
-    }
-
-    return NextResponse.json(
-      {
-        error: "Supabase request failed",
-        details: error instanceof Error ? error.message : "Unknown fetch error",
-      },
-      { status: 500 }
-    );
-  } finally {
-    clearTimeout(timeoutId);
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    if (allowMockFallback) {
-      return buildPlayersResponse({
-        rows: getMockRows(),
-        tab,
-        parsed,
-        cacheControl: "no-store",
-        dataSource: "local-mock-fallback",
-      });
-    }
-
-    return NextResponse.json(
-      { error: "Supabase query failed", details: errorText.slice(0, 500) },
-      { status: 500 }
-    );
-  }
-
-  const rows = (await response.json()) as PlayerRow[];
-  const hydratedRows = await hydrateLatestPlayerIdentity({
-    rows,
+  const skeletonRows = buildSkeletonRows(candidateRows);
+  const summaryHydratedRows = await hydrateRowsFromSummaryView({
+    rows: skeletonRows,
     supabaseUrl,
     supabaseKey,
   });
   const rowsWithReviewSignals = await hydrateSignalsFromApprovedUserReviews({
-    rows: hydratedRows,
+    rows: summaryHydratedRows,
     supabaseUrl,
     supabaseKey,
   });
