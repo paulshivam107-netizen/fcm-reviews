@@ -1096,7 +1096,7 @@ export default function HomePage() {
       <AdSlot placement="Top Banner (320x50 / 300x250)" className="mb-5" />
 
       <nav
-        className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto pb-2"
+        className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto overflow-y-visible pb-2"
         aria-label="Player role tabs"
       >
         {tabList.map((tab) => {
