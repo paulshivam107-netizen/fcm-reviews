@@ -118,3 +118,40 @@ Search behavior:
 - `113 messi` => strict `OVR = 113`, name filtered
 - `113` => strict `OVR = 113` and returns all matching cards (all positions)
 - `messi` => name filtered only
+
+## Git workflow guardrails
+
+Always keep `main` clean and synced with `origin/main`:
+
+1. Never commit directly on `main`.
+2. Start every task branch from `origin/main`.
+3. Merge only via PR.
+
+One-time local setup (already recommended for this repo):
+
+```bash
+git config --local pull.ff only
+git config --local fetch.prune true
+git config --local pull.rebase false
+```
+
+Daily commands:
+
+```bash
+# Sync local main safely (auto-backs up local-only main commits)
+npm run git:sync-main
+
+# Create a new task branch from origin/main
+npm run git:start-task -- fix-player-search
+```
+
+Script behavior:
+
+- `git:sync-main`:
+  - requires a clean working tree
+  - fetches remote with prune
+  - if local `main` has extra commits, creates `backup-main-local-<timestamp>`
+  - realigns `main` to `origin/main`
+- `git:start-task`:
+  - runs `git:sync-main`
+  - creates `codex/<task-name>` from `origin/main`
