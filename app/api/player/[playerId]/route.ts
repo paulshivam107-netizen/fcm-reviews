@@ -8,16 +8,37 @@ import { PlayerApiResponse, PlayerRow } from "@/types/player";
 
 const SUMMARY_FIELDS = [
   "player_id",
-  "player_name",
-  "base_ovr",
-  "base_position",
-  "program_promo",
   "mention_count",
   "avg_sentiment_score",
   "top_pros",
   "top_cons",
   "last_processed_at",
 ].join(",");
+
+type BasePlayerRow = {
+  id: string;
+  player_name: string;
+  base_ovr: number;
+  base_position: string;
+  program_promo: string;
+};
+
+type SummaryRow = {
+  player_id: string;
+  mention_count: number | null;
+  avg_sentiment_score: number | null;
+  top_pros: PlayerRow["top_pros"];
+  top_cons: PlayerRow["top_cons"];
+  last_processed_at: string | null;
+};
+
+type ApprovedUserReviewRow = {
+  player_id: string;
+  sentiment_score: number | string;
+  submitted_at: string;
+  pros: string[] | null;
+  cons: string[] | null;
+};
 
 function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -35,6 +56,20 @@ function hasReviewSignal(row: PlayerRow) {
     consCount > 0 ||
     Boolean(row.last_processed_at)
   );
+}
+
+function normalizeInsightTerm(input: string) {
+  return input.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function toTopTerms(source: Map<string, number>) {
+  return [...source.entries()]
+    .sort((a, b) => {
+      if (a[1] !== b[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0]);
+    })
+    .slice(0, 5)
+    .map(([text, count]) => ({ text, count }));
 }
 
 function buildResponse(args: {
@@ -100,54 +135,33 @@ export async function GET(
   }
 
   const baseUrl = supabaseUrl.replace(/\/+$/, "");
+  const applySummary = (base: BasePlayerRow, summary: SummaryRow): PlayerRow => ({
+    player_id: base.id,
+    player_name: base.player_name,
+    base_ovr: base.base_ovr,
+    base_position: base.base_position,
+    program_promo: base.program_promo,
+    mention_count: Number(summary.mention_count ?? 0),
+    avg_sentiment_score:
+      summary.avg_sentiment_score === null ? null : Number(summary.avg_sentiment_score),
+    top_pros: Array.isArray(summary.top_pros) ? summary.top_pros : [],
+    top_cons: Array.isArray(summary.top_cons) ? summary.top_cons : [],
+    last_processed_at: summary.last_processed_at,
+  });
+  const toSkeleton = (base: BasePlayerRow): PlayerRow => ({
+    player_id: base.id,
+    player_name: base.player_name,
+    base_ovr: base.base_ovr,
+    base_position: base.base_position,
+    program_promo: base.program_promo,
+    mention_count: 0,
+    avg_sentiment_score: null,
+    top_pros: [],
+    top_cons: [],
+    last_processed_at: null,
+  });
 
   try {
-    const summaryUrl = new URL(`${baseUrl}/rest/v1/mv_player_sentiment_summary`);
-    summaryUrl.searchParams.set("select", SUMMARY_FIELDS);
-    summaryUrl.searchParams.set("player_id", `eq.${playerId}`);
-    summaryUrl.searchParams.set("limit", "1");
-
-    const summaryResponse = await fetch(summaryUrl, {
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      next: { revalidate: 300 },
-    });
-
-    if (summaryResponse.ok) {
-      const rows = (await summaryResponse.json()) as PlayerRow[];
-      if (rows.length > 0) {
-        const summaryRow = rows[0];
-        if (!hasReviewSignal(summaryRow)) {
-          if (allowMockFallback) {
-            const localByIdentity = findLocalMockPlayerByIdentity({
-              playerName: summaryRow.player_name,
-              baseOvr: summaryRow.base_ovr,
-              programPromo: summaryRow.program_promo,
-            });
-            if (localByIdentity) {
-              return buildResponse({
-                item: localByIdentity,
-                cacheControl: "no-store",
-                dataSource: "local-mock-fallback",
-              });
-            }
-          }
-          return NextResponse.json(
-            { error: "Player has no approved reviews yet" },
-            { status: 404 }
-          );
-        }
-
-        return buildResponse({
-          item: summaryRow,
-          cacheControl: "s-maxage=300, stale-while-revalidate=3600",
-          dataSource: "supabase",
-        });
-      }
-    }
-
     const playersUrl = new URL(`${baseUrl}/rest/v1/players`);
     playersUrl.searchParams.set(
       "select",
@@ -180,30 +194,124 @@ export async function GET(
       );
     }
 
-    const playerRows = (await playerResponse.json()) as Array<{
-      id: string;
-      player_name: string;
-      base_ovr: number;
-      base_position: string;
-      program_promo: string;
-    }>;
+    const playerRows = (await playerResponse.json()) as BasePlayerRow[];
 
     const baseRow = playerRows[0];
     if (!baseRow) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
 
-    const localByIdentity = findLocalMockPlayerByIdentity({
-      playerName: baseRow.player_name,
-      baseOvr: baseRow.base_ovr,
-      programPromo: baseRow.program_promo,
+    const summaryUrl = new URL(`${baseUrl}/rest/v1/mv_player_sentiment_summary`);
+    summaryUrl.searchParams.set("select", SUMMARY_FIELDS);
+    summaryUrl.searchParams.set("player_id", `eq.${playerId}`);
+    summaryUrl.searchParams.set("limit", "1");
+
+    const summaryResponse = await fetch(summaryUrl, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
     });
-    if (allowMockFallback && localByIdentity) {
-      return buildResponse({
-        item: localByIdentity,
-        cacheControl: "no-store",
-        dataSource: "local-mock-fallback",
+
+    if (summaryResponse.ok) {
+      const rows = (await summaryResponse.json()) as SummaryRow[];
+      const summary = rows[0];
+      if (summary) {
+        const fromSummary = applySummary(baseRow, summary);
+        if (hasReviewSignal(fromSummary)) {
+          return buildResponse({
+            item: fromSummary,
+            cacheControl: "s-maxage=300, stale-while-revalidate=3600",
+            dataSource: "supabase",
+          });
+        }
+      }
+    }
+
+    const reviewsUrl = new URL(`${baseUrl}/rest/v1/user_review_submissions`);
+    reviewsUrl.searchParams.set(
+      "select",
+      "player_id,sentiment_score,submitted_at,pros,cons"
+    );
+    reviewsUrl.searchParams.set("player_id", `eq.${playerId}`);
+    reviewsUrl.searchParams.set("status", "eq.approved");
+    reviewsUrl.searchParams.set("order", "submitted_at.desc");
+    reviewsUrl.searchParams.set("limit", "20000");
+
+    const reviewsResponse = await fetch(reviewsUrl, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 300 },
+    });
+
+    if (reviewsResponse.ok) {
+      const reviews = (await reviewsResponse.json()) as ApprovedUserReviewRow[];
+      if (reviews.length > 0) {
+        let scoreSum = 0;
+        let count = 0;
+        const pros = new Map<string, number>();
+        const cons = new Map<string, number>();
+        let latest: string | null = null;
+
+        for (const review of reviews) {
+          const score = Number(review.sentiment_score);
+          if (!Number.isFinite(score)) continue;
+          count += 1;
+          scoreSum += score;
+
+          if (
+            review.submitted_at &&
+            (!latest ||
+              new Date(review.submitted_at).getTime() > new Date(latest).getTime())
+          ) {
+            latest = review.submitted_at;
+          }
+
+          for (const term of review.pros ?? []) {
+            const key = normalizeInsightTerm(String(term));
+            if (!key) continue;
+            pros.set(key, (pros.get(key) ?? 0) + 1);
+          }
+          for (const term of review.cons ?? []) {
+            const key = normalizeInsightTerm(String(term));
+            if (!key) continue;
+            cons.set(key, (cons.get(key) ?? 0) + 1);
+          }
+        }
+
+        if (count > 0) {
+          return buildResponse({
+            item: {
+              ...toSkeleton(baseRow),
+              mention_count: count,
+              avg_sentiment_score: Number((scoreSum / count).toFixed(2)),
+              top_pros: toTopTerms(pros),
+              top_cons: toTopTerms(cons),
+              last_processed_at: latest,
+            },
+            cacheControl: "s-maxage=300, stale-while-revalidate=3600",
+            dataSource: "supabase",
+          });
+        }
+      }
+    }
+
+    if (allowMockFallback) {
+      const localByIdentity = findLocalMockPlayerByIdentity({
+        playerName: baseRow.player_name,
+        baseOvr: baseRow.base_ovr,
+        programPromo: baseRow.program_promo,
       });
+      if (localByIdentity) {
+        return buildResponse({
+          item: localByIdentity,
+          cacheControl: "no-store",
+          dataSource: "local-mock-fallback",
+        });
+      }
     }
 
     return NextResponse.json(
