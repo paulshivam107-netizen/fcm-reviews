@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "git:sync-main": "bash scripts/git-sync-main.sh",
+    "git:start-task": "bash scripts/git-start-task.sh"
   },
   "dependencies": {
     "next": "^15.5.10",
