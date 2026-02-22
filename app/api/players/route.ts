@@ -28,6 +28,22 @@ type PlayerIdentityRow = {
   program_promo: string;
 };
 
+type ApprovedUserReviewRow = {
+  player_id: string;
+  sentiment_score: number | string;
+  submitted_at: string;
+  pros: string[] | null;
+  cons: string[] | null;
+};
+
+type ReviewFallbackAggregate = {
+  count: number;
+  scoreSum: number;
+  latestSubmittedAt: string | null;
+  pros: Map<string, number>;
+  cons: Map<string, number>;
+};
+
 function sanitizeForIlike(value: string) {
   return value.replace(/[%*,()]/g, " ").trim();
 }
@@ -42,6 +58,29 @@ function hasReviewSignal(row: PlayerRow) {
     consCount > 0 ||
     Boolean(row.last_processed_at)
   );
+}
+
+function normalizeInsightTerm(input: string) {
+  return input.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function toTopTerms(source: Map<string, number>) {
+  return [...source.entries()]
+    .sort((a, b) => {
+      if (a[1] !== b[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0]);
+    })
+    .slice(0, 5)
+    .map(([text, count]) => ({ text, count }));
+}
+
+function sortRowsForFeed(a: PlayerRow, b: PlayerRow) {
+  const scoreA = a.avg_sentiment_score ?? -1;
+  const scoreB = b.avg_sentiment_score ?? -1;
+  if (scoreA !== scoreB) return scoreB - scoreA;
+  if (a.mention_count !== b.mention_count) return b.mention_count - a.mention_count;
+  if (a.base_ovr !== b.base_ovr) return b.base_ovr - a.base_ovr;
+  return a.player_name.localeCompare(b.player_name);
 }
 
 function buildPlayersResponse(args: {
@@ -119,6 +158,102 @@ async function hydrateLatestPlayerIdentity(args: {
     .filter((row): row is PlayerRow => row !== null);
 }
 
+async function hydrateSignalsFromApprovedUserReviews(args: {
+  rows: PlayerRow[];
+  supabaseUrl: string;
+  supabaseKey: string;
+}): Promise<PlayerRow[]> {
+  const { rows, supabaseUrl, supabaseKey } = args;
+  if (!rows.length) return rows;
+
+  const playerIds = Array.from(new Set(rows.map((row) => row.player_id)));
+  const reviewUrl = new URL(
+    `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/user_review_submissions`
+  );
+  reviewUrl.searchParams.set(
+    "select",
+    "player_id,sentiment_score,submitted_at,pros,cons"
+  );
+  reviewUrl.searchParams.set("player_id", `in.(${playerIds.join(",")})`);
+  reviewUrl.searchParams.set("status", "eq.approved");
+  reviewUrl.searchParams.set("limit", "5000");
+
+  const reviewResponse = await fetch(reviewUrl, {
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+    },
+    next: { revalidate: 300 },
+  });
+
+  if (!reviewResponse.ok) {
+    return rows;
+  }
+
+  const reviewRows = (await reviewResponse.json()) as ApprovedUserReviewRow[];
+  if (!reviewRows.length) return rows;
+
+  const aggregateByPlayer = new Map<string, ReviewFallbackAggregate>();
+
+  for (const review of reviewRows) {
+    const score = Number(review.sentiment_score);
+    if (!Number.isFinite(score)) continue;
+
+    const current =
+      aggregateByPlayer.get(review.player_id) ??
+      ({
+        count: 0,
+        scoreSum: 0,
+        latestSubmittedAt: null,
+        pros: new Map<string, number>(),
+        cons: new Map<string, number>(),
+      } satisfies ReviewFallbackAggregate);
+
+    current.count += 1;
+    current.scoreSum += score;
+
+    if (
+      review.submitted_at &&
+      (!current.latestSubmittedAt ||
+        new Date(review.submitted_at).getTime() >
+          new Date(current.latestSubmittedAt).getTime())
+    ) {
+      current.latestSubmittedAt = review.submitted_at;
+    }
+
+    for (const value of review.pros ?? []) {
+      const key = normalizeInsightTerm(String(value));
+      if (!key) continue;
+      current.pros.set(key, (current.pros.get(key) ?? 0) + 1);
+    }
+
+    for (const value of review.cons ?? []) {
+      const key = normalizeInsightTerm(String(value));
+      if (!key) continue;
+      current.cons.set(key, (current.cons.get(key) ?? 0) + 1);
+    }
+
+    aggregateByPlayer.set(review.player_id, current);
+  }
+
+  return rows.map((row) => {
+    // If MV already has a signal, trust it to avoid double counting.
+    if (hasReviewSignal(row)) return row;
+
+    const aggregate = aggregateByPlayer.get(row.player_id);
+    if (!aggregate || aggregate.count <= 0) return row;
+
+    return {
+      ...row,
+      mention_count: aggregate.count,
+      avg_sentiment_score: Number((aggregate.scoreSum / aggregate.count).toFixed(2)),
+      top_pros: toTopTerms(aggregate.pros),
+      top_cons: toTopTerms(aggregate.cons),
+      last_processed_at: aggregate.latestSubmittedAt,
+    };
+  });
+}
+
 export async function GET(request: NextRequest) {
   const supabaseUrl = process.env.SUPABASE_URL;
   // Server route: prefer service role for stable read access/caching control.
@@ -142,6 +277,8 @@ export async function GET(request: NextRequest) {
   const isOvrOnlyQuery =
     parsed.requestedOvr !== null && parsed.nameQuery.trim().length === 0;
   const hasSearchQuery = parsed.raw.trim().length > 0;
+  const internalFetchLimit =
+    hasSearchQuery || isOvrOnlyQuery ? limit : Math.max(limit * 4, 120);
   const getMockRows = () =>
     queryLocalMockPlayers({
       tab,
@@ -188,10 +325,8 @@ export async function GET(request: NextRequest) {
       `in.(${POSITION_GROUPS[tab].join(",")})`
     );
   }
-  // Public list should surface only cards with at least one approved mention/review.
-  url.searchParams.set("mention_count", "gt.0");
   url.searchParams.set("order", "avg_sentiment_score.desc.nullslast,mention_count.desc,base_ovr.desc");
-  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("limit", String(internalFetchLimit));
 
   if (parsed.requestedOvr !== null) {
     url.searchParams.set("base_ovr", `eq.${parsed.requestedOvr}`);
@@ -261,13 +396,21 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = (await response.json()) as PlayerRow[];
-  const reviewedRows = rows.filter(hasReviewSignal);
   const hydratedRows = await hydrateLatestPlayerIdentity({
-    rows: reviewedRows,
+    rows,
     supabaseUrl,
     supabaseKey,
   });
-  const hasAnyReviewSignal = hydratedRows.length > 0;
+  const rowsWithReviewSignals = await hydrateSignalsFromApprovedUserReviews({
+    rows: hydratedRows,
+    supabaseUrl,
+    supabaseKey,
+  });
+  const reviewedRows = rowsWithReviewSignals
+    .filter(hasReviewSignal)
+    .sort(sortRowsForFeed)
+    .slice(0, limit);
+  const hasAnyReviewSignal = reviewedRows.length > 0;
 
   if (!hasAnyReviewSignal && allowMockFallback) {
     const mockRows = getMockRows();
@@ -290,7 +433,7 @@ export async function GET(request: NextRequest) {
   }
 
   return buildPlayersResponse({
-    rows: hydratedRows,
+    rows: reviewedRows,
     tab,
     parsed,
     cacheControl: "s-maxage=300, stale-while-revalidate=3600",
