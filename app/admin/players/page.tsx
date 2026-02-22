@@ -99,6 +99,7 @@ export default function AdminPlayersPage() {
   const [actionById, setActionById] = useState<Record<string, RowActionState>>({});
   const [archiveDays, setArchiveDays] = useState("30");
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isManualReviewOpen, setIsManualReviewOpen] = useState(false);
   const [manualReview, setManualReview] = useState<ManualReviewDraft>(() =>
     buildInitialManualReviewDraft()
   );
@@ -254,6 +255,7 @@ export default function AdminPlayersPage() {
       setError(null);
       setEditById({});
       setActionById({});
+      setIsManualReviewOpen(false);
       setManualReview(buildInitialManualReviewDraft());
       setIsSubmittingManualReview(false);
     }
@@ -356,6 +358,7 @@ export default function AdminPlayersPage() {
       const successPayload = payload as AdminManualReviewResponse;
       setFeedback(successPayload.message);
       setManualReview(buildInitialManualReviewDraft());
+      setIsManualReviewOpen(false);
       await loadPlayers();
     } catch (submitError) {
       setError(
@@ -666,14 +669,27 @@ export default function AdminPlayersPage() {
           </nav>
 
           <section className="glass-panel mb-5 rounded-2xl p-4">
-            <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">
-              Publish Admin Review
-            </p>
-            <p className="mb-3 text-xs text-slate-400">
-              Add a review as admin. It is saved as approved and reflected in card sentiment
-              after refresh.
-            </p>
-            <form onSubmit={submitManualReview} className="space-y-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">
+                  Publish Admin Review
+                </p>
+                <p className="text-xs text-slate-400">
+                  Add a review as admin. It is saved as approved and reflected in card sentiment
+                  after refresh.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsManualReviewOpen((current) => !current)}
+                className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+              >
+                {isManualReviewOpen ? "Close" : "Add Review"}
+              </button>
+            </div>
+
+            {isManualReviewOpen && (
+              <form onSubmit={submitManualReview} className="space-y-3">
               <div className="grid grid-cols-3 gap-3">
                 <label className="col-span-2 text-xs text-slate-300">
                   Player Name
@@ -882,7 +898,8 @@ export default function AdminPlayersPage() {
               >
                 {isSubmittingManualReview ? "Publishing..." : "Publish Review"}
               </button>
-            </form>
+              </form>
+            )}
           </section>
 
           <section className="glass-panel mb-5 rounded-2xl p-4">
@@ -1006,6 +1023,12 @@ export default function AdminPlayersPage() {
                       Mentions: {row.mentionCount} · Updated {formatWhen(row.updatedAt)}
                     </p>
                     <div className="mt-3 flex items-center gap-2">
+                      <Link
+                        href={`/player/${row.playerId}`}
+                        className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                      >
+                        View Card
+                      </Link>
                       <button
                         type="button"
                         onClick={() => startEdit(row)}
