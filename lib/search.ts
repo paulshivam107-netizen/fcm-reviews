@@ -5,33 +5,37 @@ export type ParsedSearch = {
 };
 
 export function parsePlayerSearch(input: string): ParsedSearch {
-  const raw = input.trim().toLowerCase();
-  const ovrOnlyPattern = /^([0-9]{2,3})$/;
-  const ovrPattern = /^([0-9]{2,3})\s+(.+)$/;
-  const ovrOnlyMatch = raw.match(ovrOnlyPattern);
-  const match = raw.match(ovrPattern);
-
-  if (ovrOnlyMatch) {
-    const requestedOvr = Number.parseInt(ovrOnlyMatch[1], 10);
+  const raw = input.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!raw) {
     return {
-      raw,
+      raw: "",
       nameQuery: "",
-      requestedOvr: Number.isFinite(requestedOvr) ? requestedOvr : null,
-    };
-  }
-
-  if (!match) {
-    return {
-      raw,
-      nameQuery: raw,
       requestedOvr: null,
     };
   }
 
-  const requestedOvr = Number.parseInt(match[1], 10);
+  const tokens = raw.split(" ");
+  let ovrTokenIndex = -1;
+  let requestedOvr: number | null = null;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!/^\d{1,3}$/.test(token)) continue;
+    const parsed = Number.parseInt(token, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 130) continue;
+    requestedOvr = parsed;
+    ovrTokenIndex = index;
+    break;
+  }
+
+  const nameQuery =
+    ovrTokenIndex >= 0
+      ? tokens.filter((_, idx) => idx !== ovrTokenIndex).join(" ").trim()
+      : raw;
+
   return {
     raw,
-    nameQuery: match[2].trim(),
-    requestedOvr: Number.isFinite(requestedOvr) ? requestedOvr : null,
+    nameQuery,
+    requestedOvr,
   };
 }

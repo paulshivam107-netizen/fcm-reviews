@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LOCAL_MOCK_PLAYERS, shouldUseLocalMockData } from "@/lib/local-mock-data";
+import { parsePlayerSearch } from "@/lib/search";
 import { requireAdminSession } from "@/lib/server/admin-session";
 import { supabaseRestRequest, supabaseRpcRequest } from "@/lib/server/supabase-admin";
 import {
@@ -356,6 +357,8 @@ export async function GET(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const queryText = normalizeFreeText(request.nextUrl.searchParams.get("q"));
+  const parsedSearch = parsePlayerSearch(queryText);
+  const hasNameQuery = parsedSearch.nameQuery.length > 0;
   const includeInactive = parseIncludeInactive(
     request.nextUrl.searchParams.get("includeInactive")
   );
@@ -368,23 +371,23 @@ export async function GET(request: NextRequest) {
 
   if (useLocalMockData) {
     const store = getLocalStore();
-    const isNumericQuery =
-      /^\d{1,3}$/.test(queryText) &&
-      Number(queryText) >= MIN_OVR &&
-      Number(queryText) <= MAX_OVR;
-    const lowered = queryText.toLowerCase();
+    const loweredNameQuery = parsedSearch.nameQuery.toLowerCase();
 
     const rows = store
       .filter((row) => includeInactive || row.is_active)
       .filter((row) => {
         if (!queryText) return true;
-        if (isNumericQuery) {
-          return row.base_ovr === Number(queryText);
+        if (
+          parsedSearch.requestedOvr !== null &&
+          row.base_ovr !== parsedSearch.requestedOvr
+        ) {
+          return false;
         }
+        if (!hasNameQuery) return true;
         return (
-          row.player_name.toLowerCase().includes(lowered) ||
-          row.program_promo.toLowerCase().includes(lowered) ||
-          row.base_position.toLowerCase().includes(lowered)
+          row.player_name.toLowerCase().includes(loweredNameQuery) ||
+          row.program_promo.toLowerCase().includes(loweredNameQuery) ||
+          row.base_position.toLowerCase().includes(loweredNameQuery)
         );
       })
       .sort((a, b) => {
@@ -423,13 +426,12 @@ export async function GET(request: NextRequest) {
       query.is_active = "eq.true";
     }
 
-    if (/^\d{1,3}$/.test(queryText)) {
-      const ovr = Number(queryText);
-      if (ovr >= MIN_OVR && ovr <= MAX_OVR) {
-        query.base_ovr = `eq.${ovr}`;
-      }
-    } else if (queryText) {
-      const cleaned = sanitizeForIlike(queryText);
+    if (parsedSearch.requestedOvr !== null) {
+      query.base_ovr = `eq.${parsedSearch.requestedOvr}`;
+    }
+
+    if (hasNameQuery) {
+      const cleaned = sanitizeForIlike(parsedSearch.nameQuery);
       if (cleaned) {
         query.or = `(player_name.ilike.*${cleaned}*,program_promo.ilike.*${cleaned}*,base_position.ilike.*${cleaned}*)`;
       }
