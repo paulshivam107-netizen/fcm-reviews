@@ -85,6 +85,33 @@ function filterTagsForPosition(tags: string[], position: string) {
   return tags.filter((tag) => allowed.has(tag));
 }
 
+function extractApiErrorMessage(args: {
+  payload: unknown;
+  fallback: string;
+  status: number;
+}) {
+  const { payload, fallback, status } = args;
+  if (!payload || typeof payload !== "object") {
+    return `${fallback} (${status})`;
+  }
+
+  const errorValue =
+    "error" in payload && typeof payload.error === "string"
+      ? payload.error.trim()
+      : "";
+  const detailsValue =
+    "details" in payload && typeof payload.details === "string"
+      ? payload.details.trim()
+      : "";
+
+  if (errorValue && detailsValue && detailsValue !== errorValue) {
+    return `${errorValue}: ${detailsValue}`;
+  }
+  if (errorValue) return errorValue;
+  if (detailsValue) return detailsValue;
+  return `${fallback} (${status})`;
+}
+
 export default function AdminPlayersPage() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
@@ -372,13 +399,15 @@ export default function AdminPlayersPage() {
       });
       const payload = (await response.json()) as
         | AdminPlayerMergePreviewResponse
-        | { error?: string };
+        | { error?: string; details?: string };
       if (!response.ok) {
-        const message =
-          "error" in payload && typeof payload.error === "string"
-            ? payload.error
-            : `Request failed (${response.status})`;
-        throw new Error(message);
+        throw new Error(
+          extractApiErrorMessage({
+            payload,
+            fallback: "Failed to preview card merge",
+            status: response.status,
+          })
+        );
       }
 
       const previewPayload = payload as AdminPlayerMergePreviewResponse;
@@ -427,13 +456,15 @@ export default function AdminPlayersPage() {
       });
       const payload = (await response.json()) as
         | AdminPlayerMergeExecuteResponse
-        | { error?: string };
+        | { error?: string; details?: string };
       if (!response.ok) {
-        const message =
-          "error" in payload && typeof payload.error === "string"
-            ? payload.error
-            : `Request failed (${response.status})`;
-        throw new Error(message);
+        throw new Error(
+          extractApiErrorMessage({
+            payload,
+            fallback: "Failed to merge cards",
+            status: response.status,
+          })
+        );
       }
 
       const summary = (payload as AdminPlayerMergeExecuteResponse).summary;
