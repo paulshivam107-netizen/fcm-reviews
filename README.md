@@ -95,6 +95,22 @@ Latest review feed reads from `public.player_sentiment_mentions` and approved
 Basic product analytics are recorded via `POST /api/track` into
 `public.app_event_logs` (searches, card opens, submissions, moderation actions).
 
+## Production recovery runbook
+
+When pilot data is missing after a new deploy or project reset:
+
+1. Run `/supabase/queries/pilot_legacy_reddit_seed.sql` in Supabase SQL Editor.
+2. Verify approved review coverage:
+   - `select status, count(*) from public.user_review_submissions group by status order by status;`
+   - `select base_position, count(*) from public.mv_player_sentiment_summary where mention_count > 0 or avg_sentiment_score is not null group by base_position order by count(*) desc;`
+3. Hard refresh the web app and recheck all four tabs.
+
+Card correction rule (to avoid the old Raul/Pirlo issue):
+
+1. If wrong card has mentions and correct card already exists: use admin `MERGE`.
+2. If correct card does not exist: edit the single card directly.
+3. Never delete a card with mentions.
+
 ## Automatic stale-card archival
 
 - Internal endpoint: `POST /api/internal/maintenance/archive-stale`
