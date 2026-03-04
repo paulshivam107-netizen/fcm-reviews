@@ -677,6 +677,7 @@ export default function HomePage() {
     []
   );
   const isReviewPanelOpen = reviewForm !== null;
+  const isSubmissionPanelOpen = isReviewPanelOpen || isFeedbackPanelOpen;
   const activeReviewTagOptions = useMemo(
     () =>
       getReviewTagsForPosition(
@@ -826,6 +827,9 @@ export default function HomePage() {
   };
 
   const onSelectPlayerForReview = (player: PlayerRow) => {
+    setIsFeedbackPanelOpen(false);
+    setFeedbackResult(null);
+    setFeedbackCaptchaToken("");
     setSelectedPlayer(player);
     setReviewForm(
       buildInitialReviewForm(player.base_position, {
@@ -862,6 +866,9 @@ export default function HomePage() {
   };
 
   const onOpenGlobalAddReview = () => {
+    setIsFeedbackPanelOpen(false);
+    setFeedbackResult(null);
+    setFeedbackCaptchaToken("");
     const preferredPlayer = selectedInsightPlayer ?? null;
     const fallbackPosition = DEFAULT_REVIEW_POSITION_BY_TAB[activeTab];
     setSelectedPlayer(preferredPlayer);
@@ -890,6 +897,10 @@ export default function HomePage() {
   };
 
   const openFeedbackPanel = () => {
+    setSelectedPlayer(null);
+    setReviewForm(null);
+    setReviewFeedback(null);
+    setCaptchaToken("");
     setIsFeedbackPanelOpen(true);
     setFeedbackResult(null);
     setFeedbackCaptchaToken("");
@@ -1288,7 +1299,7 @@ export default function HomePage() {
         })}
       </nav>
 
-      {!isReviewPanelOpen && <section className="space-y-3">
+      {!isSubmissionPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}
 
         {state === "error" && (
