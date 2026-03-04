@@ -28,6 +28,10 @@ import {
   PlayerReviewsApiResponse,
   SubmittedUsernameType,
 } from "@/types/review";
+import {
+  FeedbackSubmissionResponse,
+  UserFeedbackCategory,
+} from "@/types/feedback";
 
 type FetchState = "idle" | "loading" | "success" | "error";
 
@@ -51,7 +55,35 @@ type ReviewFeedback = {
   message: string;
 };
 
+type FeedbackFormState = {
+  category: UserFeedbackCategory;
+  message: string;
+  contact: string;
+  honeypot: string;
+};
+
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
+const FEEDBACK_CATEGORY_OPTIONS: Array<{
+  value: UserFeedbackCategory;
+  label: string;
+  help: string;
+}> = [
+  {
+    value: "review_feedback",
+    label: "Review Feedback",
+    help: "Quality, clarity, or trust in card reviews.",
+  },
+  {
+    value: "general_feedback",
+    label: "General Feedback",
+    help: "UI, search experience, performance, or bugs.",
+  },
+  {
+    value: "improvement_suggestion",
+    label: "Improvement Suggestion",
+    help: "Feature requests and roadmap suggestions.",
+  },
+];
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
 const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
@@ -150,6 +182,15 @@ function buildInitialReviewForm(
     honeypot: "",
     submittedUsername: "",
     submittedUsernameType: "",
+  };
+}
+
+function buildInitialFeedbackForm(): FeedbackFormState {
+  return {
+    category: "improvement_suggestion",
+    message: "",
+    contact: "",
+    honeypot: "",
   };
 }
 
@@ -619,6 +660,14 @@ export default function HomePage() {
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaRenderKey, setCaptchaRenderKey] = useState(0);
+  const [isFeedbackPanelOpen, setIsFeedbackPanelOpen] = useState(false);
+  const [feedbackForm, setFeedbackForm] = useState<FeedbackFormState>(() =>
+    buildInitialFeedbackForm()
+  );
+  const [feedbackResult, setFeedbackResult] = useState<ReviewFeedback | null>(null);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackCaptchaToken, setFeedbackCaptchaToken] = useState("");
+  const [feedbackCaptchaRenderKey, setFeedbackCaptchaRenderKey] = useState(0);
   const [insightReviews, setInsightReviews] = useState<PlayerReviewFeedItem[]>([]);
   const [insightReviewsState, setInsightReviewsState] = useState<FetchState>("idle");
   const [insightReviewsError, setInsightReviewsError] = useState<string | null>(null);
@@ -840,6 +889,41 @@ export default function HomePage() {
     setCaptchaToken("");
   };
 
+  const openFeedbackPanel = () => {
+    setIsFeedbackPanelOpen(true);
+    setFeedbackResult(null);
+    setFeedbackCaptchaToken("");
+    setFeedbackCaptchaRenderKey((current) => current + 1);
+  };
+
+  const closeFeedbackPanel = () => {
+    setIsFeedbackPanelOpen(false);
+    setFeedbackResult(null);
+    setIsSubmittingFeedback(false);
+    setFeedbackCaptchaToken("");
+  };
+
+  const onChangeFeedbackField =
+    <K extends keyof FeedbackFormState>(field: K) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+      const nextValue = event.target.value;
+      if (field === "category") {
+        setFeedbackForm((current) => ({
+          ...current,
+          category: nextValue as UserFeedbackCategory,
+        }));
+        return;
+      }
+      if (field === "contact") {
+        setFeedbackForm((current) => ({
+          ...current,
+          contact: nextValue.slice(0, 32),
+        }));
+        return;
+      }
+      setFeedbackForm((current) => ({ ...current, [field]: nextValue }));
+    };
+
   const onChangeReviewField =
     <K extends keyof ReviewFormState>(field: K) =>
     (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -1037,6 +1121,79 @@ export default function HomePage() {
     }
   };
 
+  const onSubmitFeedback = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmittingFeedback) return;
+
+    const message = feedbackForm.message.replace(/\s+/g, " ").trim();
+    if (message.length < 12) {
+      setFeedbackResult({
+        kind: "error",
+        message: "Please share at least 12 characters so we have enough context.",
+      });
+      return;
+    }
+
+    if (TURNSTILE_SITE_KEY && !feedbackCaptchaToken) {
+      setFeedbackResult({
+        kind: "error",
+        message: "Please complete the captcha before submitting.",
+      });
+      return;
+    }
+
+    setIsSubmittingFeedback(true);
+    setFeedbackResult(null);
+
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          category: feedbackForm.category,
+          message,
+          contact: feedbackForm.contact.trim() || null,
+          honeypot: feedbackForm.honeypot || null,
+          captchaToken: feedbackCaptchaToken || null,
+        }),
+      });
+
+      const payload = (await response.json()) as
+        | FeedbackSubmissionResponse
+        | { error?: string; message?: string };
+
+      if (!response.ok) {
+        setFeedbackResult({
+          kind: "error",
+          message:
+            "error" in payload && payload.error
+              ? payload.error
+              : "Could not submit feedback.",
+        });
+        return;
+      }
+
+      setFeedbackResult({
+        kind: "success",
+        message:
+          ("message" in payload && payload.message) ||
+          "Feedback submitted. Thanks for helping improve the app.",
+      });
+      setFeedbackForm(buildInitialFeedbackForm());
+      setFeedbackCaptchaToken("");
+      setFeedbackCaptchaRenderKey((current) => current + 1);
+    } catch {
+      setFeedbackResult({
+        kind: "error",
+        message: "Network error while submitting feedback.",
+      });
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
+
   if (!isHydrated) {
     return (
       <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
@@ -1070,6 +1227,18 @@ export default function HomePage() {
           </button>
           <p className="text-xs text-slate-400">
             Submit for any player card using name + OVR.
+          </p>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={isFeedbackPanelOpen ? closeFeedbackPanel : openFeedbackPanel}
+            className="rounded-xl border border-sky-300/35 bg-sky-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-sky-200 transition hover:bg-sky-300/20"
+          >
+            {isFeedbackPanelOpen ? "Close Feedback" : "Share Feedback"}
+          </button>
+          <p className="text-xs text-slate-400">
+            Report issues, review quality feedback, or feature suggestions.
           </p>
         </div>
       </header>
@@ -1451,6 +1620,124 @@ export default function HomePage() {
               className="w-full rounded-xl bg-accent-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isSubmittingReview ? "Submitting..." : "Submit Review"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {isFeedbackPanelOpen && (
+        <section className="glass-panel mb-6 rounded-2xl p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-sky-200">
+                Product Feedback
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">
+                Help Improve FC Mobile Reviews
+              </h2>
+              <p className="text-xs text-slate-300">
+                Share review quality feedback, bugs, or feature suggestions.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeFeedbackPanel}
+              className="rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-300"
+            >
+              Close
+            </button>
+          </div>
+
+          <form onSubmit={onSubmitFeedback} className="relative space-y-4">
+            <label className="block text-xs text-slate-300">
+              Feedback type
+              <select
+                value={feedbackForm.category}
+                onChange={onChangeFeedbackField("category")}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              >
+                {FEEDBACK_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-slate-400">
+                {
+                  FEEDBACK_CATEGORY_OPTIONS.find(
+                    (option) => option.value === feedbackForm.category
+                  )?.help
+                }
+              </span>
+            </label>
+
+            <label className="block text-xs text-slate-300">
+              Message
+              <textarea
+                value={feedbackForm.message}
+                onChange={onChangeFeedbackField("message")}
+                maxLength={1200}
+                rows={5}
+                placeholder="Tell us what should change, what is not working, or what we should build next."
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              />
+            </label>
+
+            <label className="block text-xs text-slate-300">
+              Contact (optional)
+              <input
+                type="text"
+                value={feedbackForm.contact}
+                onChange={onChangeFeedbackField("contact")}
+                maxLength={32}
+                placeholder="Reddit or in-game username"
+                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+              />
+            </label>
+
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -left-[9999px] top-auto h-0 w-0 overflow-hidden opacity-0"
+            >
+              <label htmlFor="feedback-website-field">Website</label>
+              <input
+                id="feedback-website-field"
+                type="text"
+                autoComplete="off"
+                tabIndex={-1}
+                value={feedbackForm.honeypot}
+                onChange={onChangeFeedbackField("honeypot")}
+              />
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+              <p className="mb-2 text-xs text-slate-300">Spam protection</p>
+              <TurnstileField
+                key={feedbackCaptchaRenderKey}
+                siteKey={TURNSTILE_SITE_KEY}
+                onTokenChange={setFeedbackCaptchaToken}
+              />
+            </div>
+
+            {feedbackResult && (
+              <div
+                className={[
+                  "rounded-xl px-3 py-2 text-sm",
+                  feedbackResult.kind === "success"
+                    ? "border border-lime-300/30 bg-lime-300/10 text-lime-100"
+                    : "border border-rose-300/30 bg-rose-300/10 text-rose-100",
+                ].join(" ")}
+              >
+                {feedbackResult.message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmittingFeedback}
+              className="w-full rounded-xl border border-sky-300/35 bg-sky-300/12 px-4 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isSubmittingFeedback ? "Submitting..." : "Submit Feedback"}
             </button>
           </form>
         </section>
