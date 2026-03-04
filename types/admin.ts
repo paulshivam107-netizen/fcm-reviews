@@ -20,6 +20,13 @@ export type AdminPlayersListResponse = {
   };
 };
 
+export type AdminEventOptionsResponse = {
+  items: string[];
+  meta: {
+    count: number;
+  };
+};
+
 export type AdminPlayerMutationResponse = {
   success: boolean;
   item: AdminPlayerItem;

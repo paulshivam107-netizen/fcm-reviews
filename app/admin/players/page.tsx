@@ -4,10 +4,12 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   getReviewTagsForPosition,
+  REVIEW_POSITION_OPTIONS,
   REVIEW_POSITIONS_BY_GROUP,
 } from "@/lib/review-attributes";
 import {
   AdminArchiveStaleResponse,
+  AdminEventOptionsResponse,
   AdminPlayerMergeExecuteResponse,
   AdminPlayerMergePreview,
   AdminPlayerMergePreviewResponse,
@@ -76,6 +78,16 @@ function sentimentLabel(score: number | null) {
   return `${score.toFixed(1)}/10`;
 }
 
+function sortPlayersByLatest(items: AdminPlayerItem[]) {
+  return [...items].sort((a, b) => {
+    const aUpdated = new Date(a.updatedAt).getTime();
+    const bUpdated = new Date(b.updatedAt).getTime();
+    if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+    if (a.baseOvr !== b.baseOvr) return b.baseOvr - a.baseOvr;
+    return a.playerName.localeCompare(b.playerName);
+  });
+}
+
 function normalizePositionInput(value: string) {
   return value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
 }
@@ -123,6 +135,7 @@ export default function AdminPlayersPage() {
   const [query, setQuery] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [rows, setRows] = useState<AdminPlayerItem[]>([]);
+  const [eventOptions, setEventOptions] = useState<string[]>([]);
   const [state, setState] = useState<FetchState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -187,7 +200,7 @@ export default function AdminPlayersPage() {
       }
 
       const data = payload as AdminPlayersListResponse;
-      setRows(data.items);
+      setRows(sortPlayersByLatest(data.items));
       setState("success");
     } catch (loadError) {
       setRows([]);
@@ -195,6 +208,37 @@ export default function AdminPlayersPage() {
       setError(loadError instanceof Error ? loadError.message : "Unknown error");
     }
   }, [authState, includeInactive, query]);
+
+  const loadEventOptions = useCallback(async () => {
+    if (authState !== "authenticated") {
+      setEventOptions([]);
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        includeInactive: "true",
+        limit: "1000",
+      });
+      const response = await fetch(`/api/admin/events?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        if (response.status === 401) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+          setEventOptions([]);
+        }
+        return;
+      }
+
+      const data = payload as AdminEventOptionsResponse;
+      setEventOptions(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      setEventOptions([]);
+    }
+  }, [authState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +278,10 @@ export default function AdminPlayersPage() {
     void loadPlayers();
   }, [loadPlayers]);
 
+  useEffect(() => {
+    void loadEventOptions();
+  }, [loadEventOptions]);
+
   const pendingEdits = useMemo(() => Object.keys(editById).length, [editById]);
   const manualTagOptions = useMemo(
     () => getReviewTagsForPosition(manualReview.playedPosition),
@@ -243,6 +291,26 @@ export default function AdminPlayersPage() {
     () => mergeTargetRows.find((row) => row.playerId === mergeTargetId) ?? null,
     [mergeTargetRows, mergeTargetId]
   );
+  const eventSuggestions = useMemo(() => {
+    const deduped = new Map<string, string>();
+    const addValue = (value: string | null | undefined) => {
+      const normalized = String(value ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (!deduped.has(key)) {
+        deduped.set(key, normalized);
+      }
+    };
+
+    for (const option of eventOptions) addValue(option);
+    for (const row of rows) addValue(row.programPromo);
+    for (const draft of Object.values(editById)) addValue(draft.programPromo);
+    addValue(manualReview.eventName);
+
+    return Array.from(deduped.values()).sort((a, b) => a.localeCompare(b));
+  }, [editById, eventOptions, manualReview.eventName, rows]);
 
   const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -294,6 +362,7 @@ export default function AdminPlayersPage() {
       setAuthState("unauthenticated");
       setAdminEmail(null);
       setRows([]);
+      setEventOptions([]);
       setState("idle");
       setFeedback("Signed out.");
       setError(null);
@@ -578,7 +647,7 @@ export default function AdminPlayersPage() {
       setFeedback(successPayload.message);
       setManualReview(buildInitialManualReviewDraft());
       setIsManualReviewOpen(false);
-      await loadPlayers();
+      await Promise.all([loadPlayers(), loadEventOptions()]);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -689,7 +758,9 @@ export default function AdminPlayersPage() {
 
       if ("item" in payload && payload.item) {
         setRows((current) =>
-          current.map((row) => (row.playerId === playerId ? payload.item! : row))
+          sortPlayersByLatest(
+            current.map((row) => (row.playerId === playerId ? payload.item! : row))
+          )
         );
       }
       cancelEdit(playerId);
@@ -698,6 +769,7 @@ export default function AdminPlayersPage() {
       } else {
         setFeedback("Player updated.");
       }
+      void loadEventOptions();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Update failed.");
     } finally {
@@ -861,6 +933,12 @@ export default function AdminPlayersPage() {
 
       {authState === "authenticated" && (
         <>
+          <datalist id="admin-event-options">
+            {eventSuggestions.map((eventName) => (
+              <option key={eventName} value={eventName} />
+            ))}
+          </datalist>
+
           <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
             <div>
               <p className="text-xs uppercase tracking-[0.1em] text-slate-400">Signed in</p>
@@ -946,6 +1024,7 @@ export default function AdminPlayersPage() {
                     onChange={(event) =>
                       updateManualReview({ eventName: event.target.value })
                     }
+                    list="admin-event-options"
                     maxLength={48}
                     placeholder="Leave blank to use Community"
                     className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
@@ -1378,6 +1457,12 @@ export default function AdminPlayersPage() {
             const draft = editById[row.playerId];
             const actionState = actionById[row.playerId];
             const isBusy = actionState === "saving" || actionState === "deleting";
+            const normalizedBasePosition = draft
+              ? normalizePositionInput(draft.basePosition)
+              : "";
+            const hasKnownBasePosition =
+              normalizedBasePosition.length > 0 &&
+              REVIEW_POSITION_OPTIONS.includes(normalizedBasePosition);
             return (
               <article
                 key={row.playerId}
@@ -1469,17 +1554,74 @@ export default function AdminPlayersPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <label className="text-xs text-slate-300">
                         Base Position
-                        <input
-                          type="text"
-                          value={draft.basePosition}
+                        <select
+                          value={
+                            hasKnownBasePosition
+                              ? normalizedBasePosition
+                              : normalizedBasePosition
+                                ? normalizedBasePosition
+                                : ""
+                          }
                           onChange={(event) =>
                             updateDraft(row.playerId, {
                               basePosition: normalizePositionInput(event.target.value),
                             })
                           }
-                          maxLength={4}
                           className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm uppercase text-slate-100 outline-none"
-                        />
+                        >
+                          <option value="" disabled className="bg-slate-900 text-slate-300">
+                            Select position
+                          </option>
+                          {!hasKnownBasePosition && normalizedBasePosition && (
+                            <option value={normalizedBasePosition} className="bg-slate-900 text-slate-100">
+                              {normalizedBasePosition} (current)
+                            </option>
+                          )}
+                          <optgroup label="Attacker">
+                            {REVIEW_POSITIONS_BY_GROUP.attacker.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Midfielder">
+                            {REVIEW_POSITIONS_BY_GROUP.midfielder.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Defender">
+                            {REVIEW_POSITIONS_BY_GROUP.defender.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Goalkeeper">
+                            {REVIEW_POSITIONS_BY_GROUP.goalkeeper.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
                       </label>
                       <label className="text-xs text-slate-300">
                         Event/Program (optional)
@@ -1489,6 +1631,7 @@ export default function AdminPlayersPage() {
                           onChange={(event) =>
                             updateDraft(row.playerId, { programPromo: event.target.value })
                           }
+                          list="admin-event-options"
                           maxLength={48}
                           placeholder="Leave blank to use Community"
                           className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
