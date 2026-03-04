@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   getReviewTagsForPosition,
+  REVIEW_POSITION_OPTIONS,
   REVIEW_POSITIONS_BY_GROUP,
 } from "@/lib/review-attributes";
 import {
@@ -1378,6 +1379,12 @@ export default function AdminPlayersPage() {
             const draft = editById[row.playerId];
             const actionState = actionById[row.playerId];
             const isBusy = actionState === "saving" || actionState === "deleting";
+            const normalizedBasePosition = draft
+              ? normalizePositionInput(draft.basePosition)
+              : "";
+            const hasKnownBasePosition =
+              normalizedBasePosition.length > 0 &&
+              REVIEW_POSITION_OPTIONS.includes(normalizedBasePosition);
             return (
               <article
                 key={row.playerId}
@@ -1469,17 +1476,77 @@ export default function AdminPlayersPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <label className="text-xs text-slate-300">
                         Base Position
-                        <input
-                          type="text"
-                          value={draft.basePosition}
+                        <select
+                          value={
+                            hasKnownBasePosition
+                              ? normalizedBasePosition
+                              : normalizedBasePosition
+                                ? normalizedBasePosition
+                                : ""
+                          }
                           onChange={(event) =>
                             updateDraft(row.playerId, {
                               basePosition: normalizePositionInput(event.target.value),
                             })
                           }
-                          maxLength={4}
                           className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm uppercase text-slate-100 outline-none"
-                        />
+                        >
+                          <option value="" disabled className="bg-slate-900 text-slate-300">
+                            Select position
+                          </option>
+                          {!hasKnownBasePosition && normalizedBasePosition && (
+                            <option
+                              value={normalizedBasePosition}
+                              className="bg-slate-900 text-slate-100"
+                            >
+                              {normalizedBasePosition} (current)
+                            </option>
+                          )}
+                          <optgroup label="Attacker">
+                            {REVIEW_POSITIONS_BY_GROUP.attacker.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Midfielder">
+                            {REVIEW_POSITIONS_BY_GROUP.midfielder.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Defender">
+                            {REVIEW_POSITIONS_BY_GROUP.defender.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Goalkeeper">
+                            {REVIEW_POSITIONS_BY_GROUP.goalkeeper.map((position) => (
+                              <option
+                                key={position}
+                                value={position}
+                                className="bg-slate-900 text-slate-100"
+                              >
+                                {position}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
                       </label>
                       <label className="text-xs text-slate-300">
                         Event/Program (optional)
