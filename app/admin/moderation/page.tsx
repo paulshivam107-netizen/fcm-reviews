@@ -13,6 +13,10 @@ import {
   FeedbackModerationStatus,
   UserFeedbackCategory,
 } from "@/types/feedback";
+import {
+  AdminDashboardResponse,
+  AdminDashboardSnapshot,
+} from "@/types/admin-dashboard";
 
 type FetchState = "idle" | "loading" | "success" | "error";
 type AuthState = "checking" | "authenticated" | "unauthenticated";
@@ -75,6 +79,11 @@ function feedbackCategoryHint(category: UserFeedbackCategory) {
   return "General UI, performance, or product issue.";
 }
 
+function formatRate(value: number | null) {
+  if (value === null || Number.isNaN(value)) return "N/A";
+  return `${value.toFixed(1)}%`;
+}
+
 export default function AdminModerationPage() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
@@ -92,6 +101,9 @@ export default function AdminModerationPage() {
   const [feedbackRows, setFeedbackRows] = useState<AdminFeedbackQueueItem[]>([]);
   const [reviewState, setReviewState] = useState<FetchState>("idle");
   const [feedbackState, setFeedbackState] = useState<FetchState>("idle");
+  const [dashboardState, setDashboardState] = useState<FetchState>("idle");
+  const [dashboard, setDashboard] = useState<AdminDashboardSnapshot | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -204,6 +216,60 @@ export default function AdminModerationPage() {
       cancelled = true;
     };
   }, [authState, queueType, reviewStatusFilter]);
+
+  const loadDashboard = async () => {
+    if (authState !== "authenticated") {
+      setDashboard(null);
+      setDashboardState("idle");
+      setDashboardError(null);
+      return;
+    }
+
+    setDashboardState("loading");
+    setDashboardError(null);
+
+    try {
+      const params = new URLSearchParams({ windowDays: "7" });
+      const response = await fetch(`/api/admin/dashboard?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        if (response.status === 401) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+          setDashboard(null);
+          setDashboardState("idle");
+          setDashboardError("Session expired. Please sign in again.");
+          return;
+        }
+        throw new Error(message);
+      }
+
+      const data = payload as AdminDashboardResponse;
+      setDashboard(data.snapshot);
+      setDashboardState("success");
+    } catch (loadError) {
+      setDashboard(null);
+      setDashboardState("error");
+      setDashboardError(loadError instanceof Error ? loadError.message : "Unknown error");
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboard();
+    // auth state is the only dependency that should auto-trigger this fetch.
+    // manual refresh uses the same loader through the refresh button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authState]);
 
   useEffect(() => {
     if (authState !== "authenticated" || queueType !== "feedback") {
@@ -588,6 +654,122 @@ export default function AdminModerationPage() {
               Feedback
             </button>
           </nav>
+
+          <section className="glass-panel mb-4 rounded-2xl border border-white/10 p-4">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.1em] text-slate-400">
+                  Pilot Metrics
+                </p>
+                <p className="text-sm text-slate-300">
+                  Last 24h snapshot + rolling{" "}
+                  {dashboard?.windowDays ?? 7}
+                  d uniques.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadDashboard()}
+                disabled={dashboardState === "loading"}
+                className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {dashboardState === "loading" ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            {dashboardError && (
+              <div className="mb-3 rounded-xl border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">
+                {dashboardError}
+              </div>
+            )}
+
+            {dashboardState === "loading" && !dashboard && (
+              <div className="grid grid-cols-2 gap-2">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-16 animate-pulse rounded-xl border border-white/10 bg-white/5"
+                  />
+                ))}
+              </div>
+            )}
+
+            {dashboard && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Unique 24h
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-lime-200">
+                      {dashboard.uniqueVisitors24h}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Unique {dashboard.windowDays}d
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {dashboard.uniqueVisitorsWindow}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Searches 24h
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {dashboard.searches24h}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Card Opens 24h
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {dashboard.cardOpens24h}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Review Submit 24h
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {dashboard.reviewSubmissions24h}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Review Pending
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-amber-100">
+                      {dashboard.reviewsPending}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Approval Rate 24h
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-lime-200">
+                      {formatRate(dashboard.reviewApprovalRate24h)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                      Feedback Pending
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-sky-200">
+                      {dashboard.feedbackPending}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-xs text-slate-400">
+                  Open/Search: {formatRate(dashboard.openFromSearchRatePct)} ·
+                  Review/Open: {formatRate(dashboard.reviewSubmitRatePct)}
+                </p>
+              </>
+            )}
+          </section>
 
           {queueType === "reviews" ? (
             <nav
