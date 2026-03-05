@@ -37,7 +37,13 @@ Set:
 - `CRON_SECRET` (protects internal maintenance endpoints)
 - `USE_LOCAL_MOCK_DATA` (`true` to run with local seeded data for UI testing)
 - `USE_LOCAL_MOCK_FALLBACK` (`true` to fall back to local mock cards when Supabase times out/fails)
-- `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; enable UI ad placeholders when ready)
+- `NEXT_PUBLIC_ENABLE_AD_SLOTS` (`false` by default; render ad placeholders for UI preview)
+- `ADS_ENABLED` (`false` by default; hard gate for live ad serving)
+- `AD_PROVIDER` (`none` or `adsense`; defaults to `none`)
+- `ADSENSE_CLIENT_ID` (`ca-pub-...`; required when `AD_PROVIDER=adsense` and live ads enabled)
+- `ADSENSE_SLOT_TOP_BANNER` (AdSense slot id for top banner)
+- `ADSENSE_SLOT_IN_FEED` (AdSense slot id for in-feed unit)
+- `ADSENSE_SLOT_FOOTER_STICKY` (AdSense slot id for footer unit)
 
 3. Start dev server:
 
@@ -77,7 +83,8 @@ npm run dev
 - Card insight panel:
   - aggregate sentiment/pros/cons
   - latest review feed (Reddit + approved user submissions)
-- Ad-slot placeholders (top, in-feed, footer) toggleable via env flag
+- Ad runtime config endpoint (`GET /api/ads/config`) for dark-launch ad controls
+- Ad slots (top, in-feed, footer) with live serving gate + preview placeholders
 - Legal pages:
   - `/terms`
   - `/privacy`
@@ -94,6 +101,8 @@ Latest review feed reads from `public.player_sentiment_mentions` and approved
 
 Basic product analytics are recorded via `POST /api/track` into
 `public.app_event_logs` (searches, card opens, submissions, moderation actions).
+
+Ad configuration is served via `GET /api/ads/config`, sourced from server env vars.
 
 ## Production recovery runbook
 
@@ -134,6 +143,28 @@ Search behavior:
 - `113 messi` => strict `OVR = 113`, name filtered
 - `113` => strict `OVR = 113` and returns all matching cards (all positions)
 - `messi` => name filtered only
+
+## Ad dark launch
+
+Enable backend config and keep ads off:
+
+- `ADS_ENABLED=false`
+- `AD_PROVIDER=none`
+
+Preview placeholder containers without serving ads:
+
+- `NEXT_PUBLIC_ENABLE_AD_SLOTS=true`
+
+Enable live AdSense later:
+
+- `ADS_ENABLED=true`
+- `AD_PROVIDER=adsense`
+- `ADSENSE_CLIENT_ID=ca-pub-...`
+- `ADSENSE_SLOT_TOP_BANNER=...`
+- `ADSENSE_SLOT_IN_FEED=...`
+- `ADSENSE_SLOT_FOOTER_STICKY=...`
+
+Also update `/public/ads.txt` with your real publisher line before going live.
 
 ## Git workflow guardrails
 

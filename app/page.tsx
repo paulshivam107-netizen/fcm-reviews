@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import Script from "next/script";
 import { LegalFooter } from "@/components/legal-footer";
 import { LOCAL_MOCK_PLAYERS } from "@/lib/local-mock-data";
 import { POSITION_GROUPS, TAB_LABELS, parseTab } from "@/lib/position-groups";
@@ -32,6 +33,7 @@ import {
   FeedbackSubmissionResponse,
   UserFeedbackCategory,
 } from "@/types/feedback";
+import { AdsConfigApiResponse, AdsRuntimeConfig, AdSlotKey } from "@/types/ads";
 
 type FetchState = "idle" | "loading" | "success" | "error";
 
@@ -85,7 +87,9 @@ const FEEDBACK_CATEGORY_OPTIONS: Array<{
   },
 ];
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
-const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
+const AD_CONFIG_FETCH_TIMEOUT_MS = 4500;
+const ADS_PLACEHOLDER_PREVIEW =
+  process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 const PUBLIC_SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ??
@@ -122,6 +126,20 @@ function summarizeReviewText(text: string | null, maxChars = 220) {
   if (!normalized) return "No summary available for this review yet.";
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, maxChars).trimEnd()}...`;
+}
+
+function buildDefaultAdsConfig(): AdsRuntimeConfig {
+  return {
+    enabled: false,
+    provider: "none",
+    adsenseClientId: null,
+    previewPlaceholders: ADS_PLACEHOLDER_PREVIEW,
+    slots: {
+      top_banner: { enabled: false, slotId: null },
+      in_feed: { enabled: false, slotId: null },
+      footer_sticky: { enabled: false, slotId: null },
+    },
+  };
 }
 
 function normalizeInsightTerms(terms: PlayerInsightTerm[] | undefined) {
@@ -256,6 +274,7 @@ type TurnstileApi = {
 declare global {
   interface Window {
     turnstile?: TurnstileApi;
+    adsbygoogle?: unknown[];
   }
 }
 
@@ -350,13 +369,35 @@ function TurnstileField({
 }
 
 function AdSlot({
+  slotKey,
   placement,
+  config,
   className,
 }: {
+  slotKey: AdSlotKey;
   placement: string;
+  config: AdsRuntimeConfig;
   className?: string;
 }) {
-  if (!ADS_ENABLED) return null;
+  const slot = config.slots[slotKey];
+  const shouldRenderLiveAd =
+    config.enabled &&
+    config.provider === "adsense" &&
+    Boolean(config.adsenseClientId) &&
+    slot.enabled &&
+    Boolean(slot.slotId);
+
+  useEffect(() => {
+    if (!shouldRenderLiveAd) return;
+    try {
+      window.adsbygoogle = window.adsbygoogle || [];
+      window.adsbygoogle.push({});
+    } catch {
+      // Do not block page UI if ad script is unavailable.
+    }
+  }, [shouldRenderLiveAd, slot.slotId]);
+
+  if (!shouldRenderLiveAd && !config.previewPlaceholders) return null;
 
   return (
     <aside
@@ -369,7 +410,20 @@ function AdSlot({
       <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
         Sponsored Placement
       </p>
-      <p className="mt-1 text-xs text-slate-300">{placement}</p>
+      <p className="mt-1 text-xs text-slate-300">
+        {placement}
+        {!shouldRenderLiveAd ? " (placeholder)" : ""}
+      </p>
+      {shouldRenderLiveAd && (
+        <ins
+          className="adsbygoogle mt-3 block min-h-[56px] w-full overflow-hidden rounded-lg border border-white/10 bg-black/10"
+          style={{ display: "block" }}
+          data-ad-client={config.adsenseClientId ?? undefined}
+          data-ad-slot={slot.slotId ?? undefined}
+          data-ad-format="auto"
+          data-full-width-responsive="true"
+        />
+      )}
     </aside>
   );
 }
@@ -675,6 +729,9 @@ export default function HomePage() {
   const [insightReviews, setInsightReviews] = useState<PlayerReviewFeedItem[]>([]);
   const [insightReviewsState, setInsightReviewsState] = useState<FetchState>("idle");
   const [insightReviewsError, setInsightReviewsError] = useState<string | null>(null);
+  const [adsConfig, setAdsConfig] = useState<AdsRuntimeConfig>(
+    buildDefaultAdsConfig
+  );
 
   const tabList = useMemo(
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
@@ -705,6 +762,44 @@ export default function HomePage() {
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      AD_CONFIG_FETCH_TIMEOUT_MS
+    );
+
+    async function loadAdsConfig() {
+      try {
+        const response = await fetch("/api/ads/config", {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+        const payload = (await response.json()) as AdsConfigApiResponse;
+        if (!cancelled && payload?.config) {
+          setAdsConfig(payload.config);
+        }
+      } catch {
+        if (!cancelled) {
+          setAdsConfig(buildDefaultAdsConfig());
+        }
+      }
+    }
+
+    void loadAdsConfig();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -1236,6 +1331,17 @@ export default function HomePage() {
         suppressHydrationWarning
         dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
       />
+      {adsConfig.enabled &&
+        adsConfig.provider === "adsense" &&
+        adsConfig.adsenseClientId && (
+          <Script
+            id="adsense-runtime"
+            strategy="afterInteractive"
+            async
+            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsConfig.adsenseClientId}`}
+            crossOrigin="anonymous"
+          />
+        )}
       <header className="mb-6">
         <p className="mb-2 inline-flex items-center rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-lime-200">
           FC Mobile Reviews
@@ -1294,7 +1400,12 @@ export default function HomePage() {
         </div>
       </form>
 
-      <AdSlot placement="Top Banner (320x50 / 300x250)" className="mb-5" />
+      <AdSlot
+        slotKey="top_banner"
+        placement="Top Banner (320x50 / 300x250)"
+        config={adsConfig}
+        className="mb-5"
+      />
 
       <nav
         className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto overflow-y-visible pb-2"
@@ -1355,7 +1466,12 @@ export default function HomePage() {
                 />
               )}
               {index === 2 && (
-                <AdSlot placement="In-feed (300x250)" className="mt-3" />
+                <AdSlot
+                  slotKey="in_feed"
+                  placement="In-feed (300x250)"
+                  config={adsConfig}
+                  className="mt-3"
+                />
               )}
             </div>
           ))}
@@ -1775,7 +1891,12 @@ export default function HomePage() {
         </section>
       )}
 
-      <AdSlot placement="Footer Sticky (320x50)" className="mt-6" />
+      <AdSlot
+        slotKey="footer_sticky"
+        placement="Footer Sticky (320x50)"
+        config={adsConfig}
+        className="mt-6"
+      />
       <LegalFooter />
     </main>
   );
