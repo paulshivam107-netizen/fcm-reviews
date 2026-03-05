@@ -7,14 +7,28 @@ import {
   AdminReviewQueueResponse,
   ModerationStatus,
 } from "@/types/review";
+import {
+  AdminFeedbackQueueItem,
+  AdminFeedbackQueueResponse,
+  FeedbackModerationStatus,
+  UserFeedbackCategory,
+} from "@/types/feedback";
 
 type FetchState = "idle" | "loading" | "success" | "error";
 type AuthState = "checking" | "authenticated" | "unauthenticated";
-type ActionState = "approve" | "reject" | null;
+type ReviewActionState = "approve" | "reject" | null;
+type FeedbackActionState = FeedbackModerationStatus | null;
+type QueueType = "reviews" | "feedback";
 
-const STATUS_TABS: ModerationStatus[] = ["pending", "approved", "rejected"];
+const REVIEW_STATUS_TABS: ModerationStatus[] = ["pending", "approved", "rejected"];
+const FEEDBACK_STATUS_TABS: FeedbackModerationStatus[] = [
+  "pending",
+  "reviewed",
+  "resolved",
+];
 
-function formatWhen(value: string) {
+function formatWhen(value: string | null) {
+  if (!value) return "Unknown";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return new Intl.DateTimeFormat("en-US", {
@@ -25,7 +39,7 @@ function formatWhen(value: string) {
   }).format(date);
 }
 
-function statusClass(status: ModerationStatus) {
+function reviewStatusClass(status: ModerationStatus) {
   if (status === "approved") {
     return "border-lime-300/40 bg-lime-300/12 text-lime-100";
   }
@@ -35,21 +49,64 @@ function statusClass(status: ModerationStatus) {
   return "border-amber-300/40 bg-amber-300/12 text-amber-100";
 }
 
+function feedbackStatusClass(status: FeedbackModerationStatus) {
+  if (status === "resolved") {
+    return "border-lime-300/40 bg-lime-300/12 text-lime-100";
+  }
+  if (status === "reviewed") {
+    return "border-cyan-300/40 bg-cyan-300/12 text-cyan-100";
+  }
+  return "border-amber-300/40 bg-amber-300/12 text-amber-100";
+}
+
+function feedbackCategoryLabel(category: UserFeedbackCategory) {
+  if (category === "review_feedback") return "Review Feedback";
+  if (category === "improvement_suggestion") return "Suggestion";
+  return "General Feedback";
+}
+
+function feedbackCategoryHint(category: UserFeedbackCategory) {
+  if (category === "review_feedback") {
+    return "Review quality, score quality, and card-summary feedback.";
+  }
+  if (category === "improvement_suggestion") {
+    return "Feature request or roadmap suggestion.";
+  }
+  return "General UI, performance, or product issue.";
+}
+
 export default function AdminModerationPage() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<ModerationStatus>("pending");
-  const [rows, setRows] = useState<AdminReviewQueueItem[]>([]);
-  const [state, setState] = useState<FetchState>("idle");
+
+  const [queueType, setQueueType] = useState<QueueType>("reviews");
+  const [reviewStatusFilter, setReviewStatusFilter] =
+    useState<ModerationStatus>("pending");
+  const [feedbackStatusFilter, setFeedbackStatusFilter] =
+    useState<FeedbackModerationStatus>("pending");
+
+  const [reviewRows, setReviewRows] = useState<AdminReviewQueueItem[]>([]);
+  const [feedbackRows, setFeedbackRows] = useState<AdminFeedbackQueueItem[]>([]);
+  const [reviewState, setReviewState] = useState<FetchState>("idle");
+  const [feedbackState, setFeedbackState] = useState<FetchState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [actionById, setActionById] = useState<Record<string, ActionState>>({});
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const [reviewActionById, setReviewActionById] = useState<
+    Record<string, ReviewActionState>
+  >({});
+  const [feedbackActionById, setFeedbackActionById] = useState<
+    Record<string, FeedbackActionState>
+  >({});
   const [moderationReasonById, setModerationReasonById] = useState<
     Record<string, string>
   >({});
+  const [feedbackNoteById, setFeedbackNoteById] = useState<Record<string, string>>(
+    {}
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -86,21 +143,23 @@ export default function AdminModerationPage() {
   }, []);
 
   useEffect(() => {
-    if (authState !== "authenticated") {
-      setRows([]);
-      setState("idle");
+    if (authState !== "authenticated" || queueType !== "reviews") {
+      if (authState !== "authenticated") {
+        setReviewRows([]);
+        setReviewState("idle");
+      }
       return;
     }
 
     let cancelled = false;
 
     async function loadQueue() {
-      setState("loading");
+      setReviewState("loading");
       setError(null);
 
       try {
         const params = new URLSearchParams({
-          status: statusFilter,
+          status: reviewStatusFilter,
           limit: "60",
         });
         const response = await fetch(`/api/admin/reviews?${params.toString()}`, {
@@ -119,8 +178,8 @@ export default function AdminModerationPage() {
           if (response.status === 401 && !cancelled) {
             setAuthState("unauthenticated");
             setAdminEmail(null);
-            setRows([]);
-            setState("idle");
+            setReviewRows([]);
+            setReviewState("idle");
             setError("Session expired. Please sign in again.");
             return;
           }
@@ -129,13 +188,13 @@ export default function AdminModerationPage() {
 
         const data = payload as AdminReviewQueueResponse;
         if (!cancelled) {
-          setRows(data.items);
-          setState("success");
+          setReviewRows(data.items);
+          setReviewState("success");
         }
       } catch (loadError) {
         if (cancelled) return;
-        setRows([]);
-        setState("error");
+        setReviewRows([]);
+        setReviewState("error");
         setError(loadError instanceof Error ? loadError.message : "Unknown error");
       }
     }
@@ -144,11 +203,79 @@ export default function AdminModerationPage() {
     return () => {
       cancelled = true;
     };
-  }, [authState, statusFilter]);
+  }, [authState, queueType, reviewStatusFilter]);
 
-  const pendingCount = useMemo(
-    () => rows.filter((row) => row.status === "pending").length,
-    [rows]
+  useEffect(() => {
+    if (authState !== "authenticated" || queueType !== "feedback") {
+      if (authState !== "authenticated") {
+        setFeedbackRows([]);
+        setFeedbackState("idle");
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadQueue() {
+      setFeedbackState("loading");
+      setError(null);
+
+      try {
+        const params = new URLSearchParams({
+          status: feedbackStatusFilter,
+          limit: "100",
+        });
+        const response = await fetch(`/api/admin/feedback?${params.toString()}`, {
+          cache: "no-store",
+        });
+
+        const payload = (await response.json()) as unknown;
+        if (!response.ok) {
+          const message =
+            typeof payload === "object" &&
+            payload !== null &&
+            "error" in payload &&
+            typeof payload.error === "string"
+              ? payload.error
+              : `Request failed (${response.status})`;
+          if (response.status === 401 && !cancelled) {
+            setAuthState("unauthenticated");
+            setAdminEmail(null);
+            setFeedbackRows([]);
+            setFeedbackState("idle");
+            setError("Session expired. Please sign in again.");
+            return;
+          }
+          throw new Error(message);
+        }
+
+        const data = payload as AdminFeedbackQueueResponse;
+        if (!cancelled) {
+          setFeedbackRows(data.items);
+          setFeedbackState("success");
+        }
+      } catch (loadError) {
+        if (cancelled) return;
+        setFeedbackRows([]);
+        setFeedbackState("error");
+        setError(loadError instanceof Error ? loadError.message : "Unknown error");
+      }
+    }
+
+    loadQueue();
+    return () => {
+      cancelled = true;
+    };
+  }, [authState, feedbackStatusFilter, queueType]);
+
+  const pendingReviewCount = useMemo(
+    () => reviewRows.filter((row) => row.status === "pending").length,
+    [reviewRows]
+  );
+
+  const pendingFeedbackCount = useMemo(
+    () => feedbackRows.filter((row) => row.status === "pending").length,
+    [feedbackRows]
   );
 
   const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -162,7 +289,7 @@ export default function AdminModerationPage() {
 
     setIsLoggingIn(true);
     setError(null);
-    setFeedback(null);
+    setFlash(null);
 
     try {
       const response = await fetch("/api/admin/auth/login", {
@@ -185,7 +312,7 @@ export default function AdminModerationPage() {
       setAdminEmail(payload.email ?? email);
       setLoginPassword("");
       setAuthState("authenticated");
-      setFeedback("Signed in to moderation.");
+      setFlash("Signed in to moderation.");
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Login failed.");
       setAuthState("unauthenticated");
@@ -202,14 +329,16 @@ export default function AdminModerationPage() {
     } finally {
       setAuthState("unauthenticated");
       setAdminEmail(null);
-      setRows([]);
-      setState("idle");
-      setFeedback("Signed out.");
+      setReviewRows([]);
+      setFeedbackRows([]);
+      setReviewState("idle");
+      setFeedbackState("idle");
+      setFlash("Signed out.");
       setError(null);
     }
   };
 
-  const moderateSubmission = async (
+  const moderateReview = async (
     submissionId: string,
     action: "approve" | "reject"
   ) => {
@@ -218,9 +347,9 @@ export default function AdminModerationPage() {
       return;
     }
 
-    setActionById((current) => ({ ...current, [submissionId]: action }));
+    setReviewActionById((current) => ({ ...current, [submissionId]: action }));
     setError(null);
-    setFeedback(null);
+    setFlash(null);
 
     try {
       const response = await fetch("/api/admin/reviews", {
@@ -249,7 +378,7 @@ export default function AdminModerationPage() {
         throw new Error(payload.error ?? `Request failed (${response.status})`);
       }
 
-      setRows((current) =>
+      setReviewRows((current) =>
         current
           .map((item) =>
             item.submissionId === submissionId
@@ -260,10 +389,10 @@ export default function AdminModerationPage() {
                 }
               : item
           )
-          .filter((item) => item.status === statusFilter)
+          .filter((item) => item.status === reviewStatusFilter)
       );
 
-      setFeedback(action === "approve" ? "Submission approved." : "Submission rejected.");
+      setFlash(action === "approve" ? "Submission approved." : "Submission rejected.");
     } catch (moderationError) {
       setError(
         moderationError instanceof Error
@@ -271,7 +400,81 @@ export default function AdminModerationPage() {
           : "Moderation request failed."
       );
     } finally {
-      setActionById((current) => ({ ...current, [submissionId]: null }));
+      setReviewActionById((current) => ({ ...current, [submissionId]: null }));
+    }
+  };
+
+  const moderateFeedback = async (
+    submissionId: string,
+    targetStatus: FeedbackModerationStatus
+  ) => {
+    if (authState !== "authenticated") {
+      setError("Please sign in.");
+      return;
+    }
+
+    setFeedbackActionById((current) => ({ ...current, [submissionId]: targetStatus }));
+    setError(null);
+    setFlash(null);
+
+    try {
+      const response = await fetch("/api/admin/feedback", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          submissionId,
+          status: targetStatus,
+          reviewNote: feedbackNoteById[submissionId] ?? null,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        status?: FeedbackModerationStatus;
+      };
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setAuthState("unauthenticated");
+          setAdminEmail(null);
+          throw new Error("Session expired. Please sign in again.");
+        }
+        throw new Error(payload.error ?? `Request failed (${response.status})`);
+      }
+
+      const nextStatus = payload.status ?? targetStatus;
+      setFeedbackRows((current) =>
+        current
+          .map((item) =>
+            item.submissionId === submissionId
+              ? {
+                  ...item,
+                  status: nextStatus,
+                  reviewedAt: nextStatus === "pending" ? null : new Date().toISOString(),
+                  reviewNote: feedbackNoteById[submissionId] ?? item.reviewNote,
+                }
+              : item
+          )
+          .filter((item) => item.status === feedbackStatusFilter)
+      );
+
+      if (nextStatus === "resolved") {
+        setFlash("Feedback marked as resolved.");
+      } else if (nextStatus === "reviewed") {
+        setFlash("Feedback marked as reviewed.");
+      } else {
+        setFlash("Feedback moved back to pending.");
+      }
+    } catch (moderationError) {
+      setError(
+        moderationError instanceof Error
+          ? moderationError.message
+          : "Feedback moderation failed."
+      );
+    } finally {
+      setFeedbackActionById((current) => ({ ...current, [submissionId]: null }));
     }
   };
 
@@ -283,7 +486,7 @@ export default function AdminModerationPage() {
         </p>
         <h1 className="text-2xl font-bold text-slate-100">Moderation Queue</h1>
         <p className="mt-2 text-sm text-slate-300">
-          Approve or reject user-submitted reviews before they appear publicly.
+          Review user-submitted card reviews and product feedback/suggestions.
         </p>
       </header>
 
@@ -359,35 +562,88 @@ export default function AdminModerationPage() {
             </Link>
           </nav>
 
-          <nav
-            className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
-            aria-label="Moderation status tabs"
-          >
-            {STATUS_TABS.map((status) => {
-              const active = status === statusFilter;
-              return (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => setStatusFilter(status)}
-                  className={[
-                    "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
-                    active
-                      ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
-                      : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
-                  ].join(" ")}
-                >
-                  {status}
-                </button>
-              );
-            })}
+          <nav className="mb-4 flex gap-2" aria-label="Queue type tabs">
+            <button
+              type="button"
+              onClick={() => setQueueType("reviews")}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-semibold transition",
+                queueType === "reviews"
+                  ? "bg-accent-500 text-slate-950"
+                  : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+              ].join(" ")}
+            >
+              Reviews
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueueType("feedback")}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-semibold transition",
+                queueType === "feedback"
+                  ? "bg-accent-500 text-slate-950"
+                  : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+              ].join(" ")}
+            >
+              Feedback
+            </button>
           </nav>
+
+          {queueType === "reviews" ? (
+            <nav
+              className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
+              aria-label="Review moderation status tabs"
+            >
+              {REVIEW_STATUS_TABS.map((status) => {
+                const active = status === reviewStatusFilter;
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setReviewStatusFilter(status)}
+                    className={[
+                      "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
+                      active
+                        ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
+                        : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+                    ].join(" ")}
+                  >
+                    {status}
+                  </button>
+                );
+              })}
+            </nav>
+          ) : (
+            <nav
+              className="soft-scrollbar mb-5 flex snap-x gap-2 overflow-x-auto pb-2"
+              aria-label="Feedback moderation status tabs"
+            >
+              {FEEDBACK_STATUS_TABS.map((status) => {
+                const active = status === feedbackStatusFilter;
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setFeedbackStatusFilter(status)}
+                    className={[
+                      "shrink-0 snap-start rounded-full px-4 py-2 text-sm font-semibold transition",
+                      active
+                        ? "bg-accent-500 text-slate-950 shadow-[0_8px_24px_rgba(184,245,106,0.22)]"
+                        : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+                    ].join(" ")}
+                  >
+                    {status}
+                  </button>
+                );
+              })}
+            </nav>
+          )}
         </>
       )}
 
-      {feedback && (
+      {flash && (
         <div className="mb-4 rounded-xl border border-lime-300/30 bg-lime-300/10 px-3 py-2 text-sm text-lime-100">
-          {feedback}
+          {flash}
         </div>
       )}
 
@@ -397,134 +653,277 @@ export default function AdminModerationPage() {
         </div>
       )}
 
-      {authState === "authenticated" && state === "loading" && (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div
-              key={index}
-              className="glass-panel h-28 animate-pulse rounded-2xl border border-white/10"
-            />
-          ))}
-        </div>
-      )}
+      {authState === "authenticated" &&
+        queueType === "reviews" &&
+        reviewState === "loading" && (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={index}
+                className="glass-panel h-28 animate-pulse rounded-2xl border border-white/10"
+              />
+            ))}
+          </div>
+        )}
 
-      {authState === "authenticated" && state === "success" && rows.length === 0 && (
-        <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
-          No {statusFilter} reviews in queue.
-        </div>
-      )}
+      {authState === "authenticated" &&
+        queueType === "feedback" &&
+        feedbackState === "loading" && (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={index}
+                className="glass-panel h-28 animate-pulse rounded-2xl border border-white/10"
+              />
+            ))}
+          </div>
+        )}
 
-      {authState === "authenticated" && state === "success" && rows.length > 0 && (
-        <section className="space-y-3">
-          <p className="text-xs text-slate-400">
-            Showing {rows.length} submissions
-            {statusFilter === "pending" ? ` (${pendingCount} pending)` : ""}.
-          </p>
+      {authState === "authenticated" &&
+        queueType === "reviews" &&
+        reviewState === "success" &&
+        reviewRows.length === 0 && (
+          <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
+            No {reviewStatusFilter} reviews in queue.
+          </div>
+        )}
 
-          {rows.map((row) => {
-            const actionState = actionById[row.submissionId];
-            const isBusy = actionState === "approve" || actionState === "reject";
-            return (
-              <article
-                key={row.submissionId}
-                className="glass-panel rounded-2xl border border-white/10 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-100">
-                      {row.playerName} · {row.playerOvr} · {row.playerPosition}
-                    </h2>
-                    <p className="mt-1 text-xs text-slate-300">
-                      Submitted {formatWhen(row.submittedAt)}
+      {authState === "authenticated" &&
+        queueType === "feedback" &&
+        feedbackState === "success" &&
+        feedbackRows.length === 0 && (
+          <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
+            No {feedbackStatusFilter} feedback submissions in queue.
+          </div>
+        )}
+
+      {authState === "authenticated" &&
+        queueType === "reviews" &&
+        reviewState === "success" &&
+        reviewRows.length > 0 && (
+          <section className="space-y-3">
+            <p className="text-xs text-slate-400">
+              Showing {reviewRows.length} submissions
+              {reviewStatusFilter === "pending" ? ` (${pendingReviewCount} pending)` : ""}
+              .
+            </p>
+
+            {reviewRows.map((row) => {
+              const actionState = reviewActionById[row.submissionId];
+              const isBusy = actionState === "approve" || actionState === "reject";
+              return (
+                <article
+                  key={row.submissionId}
+                  className="glass-panel rounded-2xl border border-white/10 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-100">
+                        {row.playerName} · {row.playerOvr} · {row.playerPosition}
+                      </h2>
+                      <p className="mt-1 text-xs text-slate-300">
+                        Submitted {formatWhen(row.submittedAt)}
+                      </p>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                        reviewStatusClass(row.status),
+                      ].join(" ")}
+                    >
+                      {row.status}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                    <p>
+                      Sentiment:{" "}
+                      <span className="font-semibold text-lime-200">
+                        {row.sentimentScore.toFixed(1)}/10
+                      </span>
+                    </p>
+                    <p>
+                      Played:{" "}
+                      <span className="font-semibold text-slate-100">
+                        {row.playedPosition}
+                      </span>
+                    </p>
+                    <p>
+                      Username:{" "}
+                      <span className="font-semibold text-slate-100">
+                        {row.submittedUsername
+                          ? `${row.submittedUsername} (${row.submittedUsernameType ?? "unknown"})`
+                          : "Anonymous"}
+                      </span>
+                    </p>
+                    <p>
+                      Rank:{" "}
+                      <span className="font-semibold text-slate-100">
+                        {row.mentionedRankText ?? "Not specified"}
+                      </span>
                     </p>
                   </div>
-                  <span
-                    className={[
-                      "rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
-                      statusClass(row.status),
-                    ].join(" ")}
-                  >
-                    {row.status}
-                  </span>
-                </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
-                  <p>
-                    Sentiment:{" "}
-                    <span className="font-semibold text-lime-200">
-                      {row.sentimentScore.toFixed(1)}/10
-                    </span>
-                  </p>
-                  <p>
-                    Played:{" "}
-                    <span className="font-semibold text-slate-100">
-                      {row.playedPosition}
-                    </span>
-                  </p>
-                  <p>
-                    Username:{" "}
-                    <span className="font-semibold text-slate-100">
-                      {row.submittedUsername
-                        ? `${row.submittedUsername} (${row.submittedUsernameType ?? "unknown"})`
-                        : "Anonymous"}
-                    </span>
-                  </p>
-                  <p>
-                    Rank:{" "}
-                    <span className="font-semibold text-slate-100">
-                      {row.mentionedRankText ?? "Not specified"}
-                    </span>
-                  </p>
-                </div>
+                  {row.note && (
+                    <p className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-200">
+                      {row.note}
+                    </p>
+                  )}
 
-                {row.note && (
-                  <p className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-200">
-                    {row.note}
-                  </p>
-                )}
+                  <label className="mt-3 block text-xs text-slate-300">
+                    Moderation reason (optional)
+                    <input
+                      type="text"
+                      value={moderationReasonById[row.submissionId] ?? ""}
+                      onChange={(event) =>
+                        setModerationReasonById((current) => ({
+                          ...current,
+                          [row.submissionId]: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional note for reject/approve action"
+                      maxLength={300}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
 
-                <label className="mt-3 block text-xs text-slate-300">
-                  Moderation reason (optional)
-                  <input
-                    type="text"
-                    value={moderationReasonById[row.submissionId] ?? ""}
-                    onChange={(event) =>
-                      setModerationReasonById((current) => ({
-                        ...current,
-                        [row.submissionId]: event.target.value,
-                      }))
-                    }
-                    placeholder="Optional note for reject/approve action"
-                    maxLength={300}
-                    className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-                  />
-                </label>
+                  {row.status === "pending" && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => moderateReview(row.submissionId, "approve")}
+                        className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {actionState === "approve" ? "Approving..." : "Approve"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => moderateReview(row.submissionId, "reject")}
+                        className="rounded-xl border border-rose-300/35 bg-rose-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {actionState === "reject" ? "Rejecting..." : "Reject"}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </section>
+        )}
 
-                {row.status === "pending" && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => moderateSubmission(row.submissionId, "approve")}
-                      className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+      {authState === "authenticated" &&
+        queueType === "feedback" &&
+        feedbackState === "success" &&
+        feedbackRows.length > 0 && (
+          <section className="space-y-3">
+            <p className="text-xs text-slate-400">
+              Showing {feedbackRows.length} feedback entries
+              {feedbackStatusFilter === "pending"
+                ? ` (${pendingFeedbackCount} pending)`
+                : ""}
+              .
+            </p>
+
+            {feedbackRows.map((row) => {
+              const actionState = feedbackActionById[row.submissionId];
+              const isBusy = Boolean(actionState);
+              return (
+                <article
+                  key={row.submissionId}
+                  className="glass-panel rounded-2xl border border-white/10 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-100">
+                        {feedbackCategoryLabel(row.category)}
+                      </h2>
+                      <p className="mt-1 text-xs text-slate-300">
+                        {feedbackCategoryHint(row.category)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Submitted {formatWhen(row.createdAt)}
+                        {row.reviewedAt ? ` · Reviewed ${formatWhen(row.reviewedAt)}` : ""}
+                      </p>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                        feedbackStatusClass(row.status),
+                      ].join(" ")}
                     >
-                      {actionState === "approve" ? "Approving..." : "Approve"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => moderateSubmission(row.submissionId, "reject")}
-                      className="rounded-xl border border-rose-300/35 bg-rose-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {actionState === "reject" ? "Rejecting..." : "Reject"}
-                    </button>
+                      {row.status}
+                    </span>
                   </div>
-                )}
-              </article>
-            );
-          })}
-        </section>
-      )}
+
+                  <p className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-200">
+                    {row.message}
+                  </p>
+
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-300">
+                    <p>
+                      Contact:{" "}
+                      <span className="font-semibold text-slate-100">
+                        {row.contact || "Anonymous"}
+                      </span>
+                    </p>
+                  </div>
+
+                  <label className="mt-3 block text-xs text-slate-300">
+                    Review note (optional)
+                    <input
+                      type="text"
+                      value={feedbackNoteById[row.submissionId] ?? row.reviewNote ?? ""}
+                      onChange={(event) =>
+                        setFeedbackNoteById((current) => ({
+                          ...current,
+                          [row.submissionId]: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional admin note"
+                      maxLength={400}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {row.status !== "reviewed" && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => moderateFeedback(row.submissionId, "reviewed")}
+                        className="rounded-xl border border-cyan-300/35 bg-cyan-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {actionState === "reviewed" ? "Saving..." : "Mark Reviewed"}
+                      </button>
+                    )}
+                    {row.status !== "resolved" && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => moderateFeedback(row.submissionId, "resolved")}
+                        className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {actionState === "resolved" ? "Saving..." : "Resolve"}
+                      </button>
+                    )}
+                    {row.status !== "pending" && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => moderateFeedback(row.submissionId, "pending")}
+                        className="rounded-xl border border-amber-300/35 bg-amber-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {actionState === "pending" ? "Saving..." : "Move to Pending"}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+        )}
     </main>
   );
 }

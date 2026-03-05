@@ -17,3 +17,29 @@ export type FeedbackSubmissionResponse = {
   submissionId: string;
   message: string;
 };
+
+export type FeedbackModerationStatus = "pending" | "reviewed" | "resolved";
+
+export type AdminFeedbackQueueItem = {
+  submissionId: string;
+  category: UserFeedbackCategory;
+  message: string;
+  contact: string | null;
+  status: FeedbackModerationStatus;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+};
+
+export type AdminFeedbackQueueResponse = {
+  items: AdminFeedbackQueueItem[];
+  meta: {
+    status: FeedbackModerationStatus;
+    count: number;
+  };
+};
+
+export type AdminFeedbackModerationResponse = {
+  success: boolean;
+  status: FeedbackModerationStatus;
+};
