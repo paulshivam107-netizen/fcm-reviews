@@ -27,6 +27,13 @@ type LocalSubmission = {
   created_at: string;
 };
 
+type SupabaseErrorShape = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
 declare global {
   // eslint-disable-next-line no-var
   var __fcmLocalFeedbackSubmissions: LocalSubmission[] | undefined;
@@ -121,6 +128,33 @@ function getLocalSubmissionStore(): LocalSubmission[] {
 
   globalThis.__fcmLocalFeedbackSubmissions = [];
   return globalThis.__fcmLocalFeedbackSubmissions;
+}
+
+function parseSupabaseErrorBody(raw: string): SupabaseErrorShape {
+  try {
+    const parsed = JSON.parse(raw) as SupabaseErrorShape;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isFeedbackTableMissing(raw: string) {
+  const parsed = parseSupabaseErrorBody(raw);
+  const combined = [
+    parsed.code ?? "",
+    parsed.message ?? "",
+    parsed.details ?? "",
+    parsed.hint ?? "",
+    raw,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    combined.includes("pgrst205") &&
+    combined.includes("user_feedback_submissions")
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -231,6 +265,15 @@ export async function POST(request: NextRequest) {
 
     if (!recentResponse.ok) {
       const details = await recentResponse.text();
+      if (isFeedbackTableMissing(details)) {
+        return NextResponse.json(
+          {
+            error:
+              "Feedback storage is not initialized. Admin needs to run migration 20260304182000_user_feedback_submissions.sql.",
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json(
         { error: "Could not validate feedback rate limit.", details: details.slice(0, 300) },
         { status: 500 }
@@ -267,6 +310,15 @@ export async function POST(request: NextRequest) {
 
     if (!insertResponse.ok) {
       const details = await insertResponse.text();
+      if (isFeedbackTableMissing(details)) {
+        return NextResponse.json(
+          {
+            error:
+              "Feedback storage is not initialized. Admin needs to run migration 20260304182000_user_feedback_submissions.sql.",
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json(
         { error: "Could not store feedback.", details: details.slice(0, 400) },
         { status: 500 }
