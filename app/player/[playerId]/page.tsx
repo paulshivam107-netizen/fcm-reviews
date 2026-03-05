@@ -8,6 +8,10 @@ import { PlayerApiResponse, PlayerInsightTerm, PlayerRow } from "@/types/player"
 import { PlayerReviewFeedItem, PlayerReviewsApiResponse } from "@/types/review";
 
 type FetchState = "idle" | "loading" | "success" | "error";
+const PUBLIC_SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  "https://fcm-reviews-production.up.railway.app"
+).replace(/\/+$/, "");
 
 function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -60,6 +64,38 @@ export default function PlayerDetailPage() {
   const validPlayerId = useMemo(() => isUuidLike(playerId), [playerId]);
   const pros = normalizeInsightTerms(player?.top_pros);
   const cons = normalizeInsightTerms(player?.top_cons);
+  const playerJsonLd = useMemo(() => {
+    if (!player) return null;
+
+    const mentionCount = Number(player.mention_count ?? 0);
+    const sentiment = Number(player.avg_sentiment_score ?? NaN);
+    const hasRating = mentionCount > 0 && Number.isFinite(sentiment);
+
+    const payload: Record<string, unknown> = {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: `${player.player_name} ${player.base_ovr} ${player.base_position}`,
+      category: "FC Mobile Player Card",
+      brand: {
+        "@type": "Brand",
+        name: "EA SPORTS FC Mobile",
+      },
+      url: `${PUBLIC_SITE_URL}/player/${player.player_id}`,
+      description: `${player.program_promo} card community sentiment and user reviews.`,
+    };
+
+    if (hasRating) {
+      payload.aggregateRating = {
+        "@type": "AggregateRating",
+        ratingValue: Number(sentiment.toFixed(2)),
+        bestRating: 10,
+        worstRating: 1,
+        ratingCount: mentionCount,
+      };
+    }
+
+    return payload;
+  }, [player]);
 
   useEffect(() => {
     if (!validPlayerId) {
@@ -153,6 +189,13 @@ export default function PlayerDetailPage() {
 
       {state === "success" && player && (
         <>
+          {playerJsonLd && (
+            <script
+              type="application/ld+json"
+              suppressHydrationWarning
+              dangerouslySetInnerHTML={{ __html: JSON.stringify(playerJsonLd) }}
+            />
+          )}
           <section className="glass-panel rounded-2xl p-4">
             <div className="flex items-start justify-between gap-3">
               <div>

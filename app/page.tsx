@@ -87,6 +87,10 @@ const FEEDBACK_CATEGORY_OPTIONS: Array<{
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
 const ADS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+const PUBLIC_SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  "https://fcm-reviews-production.up.railway.app"
+).replace(/\/+$/, "");
 const DEFAULT_REVIEW_POSITION_BY_TAB: Record<PlayerTab, string> = {
   attacker: "ST",
   midfielder: "CM",
@@ -678,6 +682,18 @@ export default function HomePage() {
   );
   const isReviewPanelOpen = reviewForm !== null;
   const isSubmissionPanelOpen = isReviewPanelOpen || isFeedbackPanelOpen;
+  const websiteJsonLd = useMemo(
+    () => ({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "FC Mobile Reviews",
+      url: PUBLIC_SITE_URL,
+      description:
+        "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+      inLanguage: "en",
+    }),
+    []
+  );
   const activeReviewTagOptions = useMemo(
     () =>
       getReviewTagsForPosition(
@@ -1215,6 +1231,11 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+      />
       <header className="mb-6">
         <p className="mb-2 inline-flex items-center rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-lime-200">
           FC Mobile Reviews
