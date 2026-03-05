@@ -35,6 +35,13 @@ type SupabaseFeedbackRow = {
   review_note: string | null;
 };
 
+type SupabaseErrorShape = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
 type LocalFeedbackQueueItem = AdminFeedbackQueueItem;
 
 declare global {
@@ -112,6 +119,55 @@ function getLocalQueueStore() {
   return globalThis.__fcmLocalAdminFeedbackQueue;
 }
 
+function parseSupabaseErrorBody(raw: string): SupabaseErrorShape {
+  try {
+    const parsed = JSON.parse(raw) as SupabaseErrorShape;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getFeedbackStorageError(raw: string) {
+  const parsed = parseSupabaseErrorBody(raw);
+  const combined = [
+    parsed.code ?? "",
+    parsed.message ?? "",
+    parsed.details ?? "",
+    parsed.hint ?? "",
+    raw,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    (combined.includes("pgrst205") &&
+      combined.includes("user_feedback_submissions")) ||
+    combined.includes('relation "user_feedback_submissions" does not exist')
+  ) {
+    return {
+      error:
+        "Feedback storage is not initialized. Run migration 20260304182000_user_feedback_submissions.sql in Supabase SQL editor.",
+      status: 503,
+    };
+  }
+
+  if (
+    combined.includes("42501") ||
+    combined.includes("permission denied") ||
+    combined.includes("insufficient_privilege") ||
+    combined.includes("forbidden")
+  ) {
+    return {
+      error:
+        "Feedback moderation requires SUPABASE_SERVICE_ROLE_KEY. Update Railway variable and redeploy.",
+      status: 500,
+    };
+  }
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   const auth = requireAdminSession(request);
   if (!auth.ok) return auth.response;
@@ -133,6 +189,16 @@ export async function GET(request: NextRequest) {
       )
       .slice(0, limit);
     return toQueueResponse(status, items);
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+    return NextResponse.json(
+      {
+        error:
+          "Feedback moderation requires SUPABASE_SERVICE_ROLE_KEY. Update Railway variable and redeploy.",
+      },
+      { status: 500 }
+    );
   }
 
   try {
@@ -159,6 +225,13 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const details = await response.text();
+      const storageError = getFeedbackStorageError(details);
+      if (storageError) {
+        return NextResponse.json(
+          { error: storageError.error },
+          { status: storageError.status }
+        );
+      }
       return NextResponse.json(
         { error: "Failed to fetch feedback queue", details: details.slice(0, 500) },
         { status: 500 }
@@ -238,6 +311,16 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(response);
     }
 
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+      return NextResponse.json(
+        {
+          error:
+            "Feedback moderation requires SUPABASE_SERVICE_ROLE_KEY. Update Railway variable and redeploy.",
+        },
+        { status: 500 }
+      );
+    }
+
     const updateResponse = await supabaseRestRequest({
       endpoint: "user_feedback_submissions",
       method: "PATCH",
@@ -255,6 +338,13 @@ export async function PATCH(request: NextRequest) {
 
     if (!updateResponse.ok) {
       const details = await updateResponse.text();
+      const storageError = getFeedbackStorageError(details);
+      if (storageError) {
+        return NextResponse.json(
+          { error: storageError.error },
+          { status: storageError.status }
+        );
+      }
       return NextResponse.json(
         { error: "Failed to update feedback submission", details: details.slice(0, 500) },
         { status: 500 }
