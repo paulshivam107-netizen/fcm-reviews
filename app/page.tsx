@@ -101,6 +101,28 @@ const DEFAULT_REVIEW_POSITION_BY_TAB: Record<PlayerTab, string> = {
   defender: "CB",
   goalkeeper: "GK",
 };
+const TAB_SEO_COPY: Record<PlayerTab, { heading: string; description: string }> = {
+  attacker: {
+    heading: "Top Attacker Reviews",
+    description:
+      "Compare ST, RW, LW, CF cards by approved sentiment, mention volume, and recurring strengths like pace, finishing, and positioning.",
+  },
+  midfielder: {
+    heading: "Top Midfielder Reviews",
+    description:
+      "Track CAM, CM, and CDM cards by community sentiment, with emphasis on passing, work rate, control, and defensive coverage.",
+  },
+  defender: {
+    heading: "Top Defender Reviews",
+    description:
+      "Review CB, LB, and RB cards using approved feedback on recovery pace, tackling, aerial presence, and defensive positioning.",
+  },
+  goalkeeper: {
+    heading: "Top Goalkeeper Reviews",
+    description:
+      "Check GK cards by approved sentiment and reliability signals such as shot stopping, reflexes, command of box, and distribution.",
+  },
+};
 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
@@ -673,7 +695,7 @@ function InsightPanel({
                   <a
                     href={review.sourceUrl}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="ugc nofollow noopener noreferrer"
                     className="mt-2 inline-block text-xs font-medium text-lime-200 underline-offset-2 hover:underline"
                   >
                     Open source
@@ -1430,6 +1452,29 @@ export default function HomePage() {
           );
         })}
       </nav>
+
+      <section className="glass-panel mb-5 rounded-2xl p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+          Crawlable Top Lists
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {tabList.map((tab) => (
+            <Link
+              key={`top-link-${tab}`}
+              href={`/top/${tab}`}
+              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200 transition hover:bg-white/10"
+            >
+              Top {TAB_LABELS[tab]}
+            </Link>
+          ))}
+        </div>
+        <h2 className="mt-3 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+          {TAB_SEO_COPY[activeTab].heading}
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-300">
+          {TAB_SEO_COPY[activeTab].description}
+        </p>
+      </section>
 
       {!isSubmissionPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}

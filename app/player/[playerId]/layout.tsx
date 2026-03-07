@@ -6,8 +6,17 @@ type PlayerMetadataRow = {
   base_ovr: number;
   base_position: string;
   program_promo: string;
+};
+
+type PlayerSummaryRow = {
   mention_count: number | null;
   avg_sentiment_score: number | null;
+};
+
+type PlayerMetadataResult = PlayerMetadataRow & {
+  mention_count: number;
+  avg_sentiment_score: number | null;
+  hasApprovedReviews: boolean;
 };
 
 function isUuidLike(value: string) {
@@ -16,7 +25,7 @@ function isUuidLike(value: string) {
   );
 }
 
-async function fetchPlayerMetadata(playerId: string): Promise<PlayerMetadataRow | null> {
+async function fetchPlayerMetadata(playerId: string): Promise<PlayerMetadataResult | null> {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, "");
   const supabaseKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -24,16 +33,17 @@ async function fetchPlayerMetadata(playerId: string): Promise<PlayerMetadataRow 
 
   if (!supabaseUrl || !supabaseKey || !isUuidLike(playerId)) return null;
 
-  const summaryUrl = new URL(`${supabaseUrl}/rest/v1/mv_player_sentiment_summary`);
-  summaryUrl.searchParams.set(
+  const playerUrl = new URL(`${supabaseUrl}/rest/v1/players`);
+  playerUrl.searchParams.set(
     "select",
-    "player_name,base_ovr,base_position,program_promo,mention_count,avg_sentiment_score"
+    "player_name,base_ovr,base_position,program_promo"
   );
-  summaryUrl.searchParams.set("player_id", `eq.${playerId}`);
-  summaryUrl.searchParams.set("limit", "1");
+  playerUrl.searchParams.set("id", `eq.${playerId}`);
+  playerUrl.searchParams.set("is_active", "eq.true");
+  playerUrl.searchParams.set("limit", "1");
 
   try {
-    const response = await fetch(summaryUrl.toString(), {
+    const baseResponse = await fetch(playerUrl.toString(), {
       headers: {
         apikey: supabaseKey,
         Authorization: `Bearer ${supabaseKey}`,
@@ -41,10 +51,68 @@ async function fetchPlayerMetadata(playerId: string): Promise<PlayerMetadataRow 
       next: { revalidate: 600 },
     });
 
-    if (!response.ok) return null;
-    const rows = (await response.json()) as PlayerMetadataRow[];
-    const first = rows[0];
-    return first ?? null;
+    if (!baseResponse.ok) return null;
+    const baseRows = (await baseResponse.json()) as PlayerMetadataRow[];
+    const base = baseRows[0];
+    if (!base) return null;
+
+    const summaryUrl = new URL(`${supabaseUrl}/rest/v1/mv_player_sentiment_summary`);
+    summaryUrl.searchParams.set("select", "mention_count,avg_sentiment_score");
+    summaryUrl.searchParams.set("player_id", `eq.${playerId}`);
+    summaryUrl.searchParams.set("limit", "1");
+
+    const summaryResponse = await fetch(summaryUrl.toString(), {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 600 },
+    });
+
+    let mentionCount = 0;
+    let avgSentiment: number | null = null;
+    if (summaryResponse.ok) {
+      const summaryRows = (await summaryResponse.json()) as PlayerSummaryRow[];
+      const summary = summaryRows[0];
+      mentionCount = Number(summary?.mention_count ?? 0);
+      const rawAvg = summary?.avg_sentiment_score;
+      avgSentiment =
+        rawAvg === null || rawAvg === undefined ? null : Number(rawAvg);
+    }
+
+    if (mentionCount > 0 || avgSentiment !== null) {
+      return {
+        ...base,
+        mention_count: mentionCount,
+        avg_sentiment_score: avgSentiment,
+        hasApprovedReviews: true,
+      };
+    }
+
+    const approvedUrl = new URL(`${supabaseUrl}/rest/v1/user_review_submissions`);
+    approvedUrl.searchParams.set("select", "id");
+    approvedUrl.searchParams.set("player_id", `eq.${playerId}`);
+    approvedUrl.searchParams.set("status", "eq.approved");
+    approvedUrl.searchParams.set("limit", "1");
+
+    const approvedResponse = await fetch(approvedUrl.toString(), {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+      next: { revalidate: 600 },
+    });
+
+    const hasApprovedReviews = approvedResponse.ok
+      ? ((await approvedResponse.json()) as Array<{ id: string }>).length > 0
+      : false;
+
+    return {
+      ...base,
+      mention_count: mentionCount,
+      avg_sentiment_score: avgSentiment,
+      hasApprovedReviews,
+    };
   } catch {
     return null;
   }
@@ -65,6 +133,10 @@ export async function generateMetadata({
     return {
       title: "Player Card",
       description: "FC Mobile player card sentiment and reviews.",
+      robots: {
+        index: false,
+        follow: false,
+      },
       alternates: {
         canonical: canonicalPath,
       },
@@ -82,6 +154,20 @@ export async function generateMetadata({
     };
   }
 
+  if (!player.hasApprovedReviews) {
+    return {
+      title: `${player.player_name} ${player.base_ovr} ${player.base_position}`,
+      description: "No approved reviews published for this card yet.",
+      robots: {
+        index: false,
+        follow: false,
+      },
+      alternates: {
+        canonical: canonicalPath,
+      },
+    };
+  }
+
   const mentionCount = Number(player.mention_count ?? 0);
   const sentiment = Number(player.avg_sentiment_score ?? NaN);
   const sentimentText = Number.isFinite(sentiment) ? `${sentiment.toFixed(1)}/10` : "N/A";
@@ -89,7 +175,7 @@ export async function generateMetadata({
   const title = `${player.player_name} ${player.base_ovr} ${player.base_position} Review`;
   const description =
     `${player.program_promo} card. Community sentiment ${sentimentText}` +
-    ` from ${mentionCount} review${mentionCount === 1 ? "" : "s"}.`;
+    ` from ${mentionCount} approved review${mentionCount === 1 ? "" : "s"}.`;
 
   return {
     title,
