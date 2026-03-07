@@ -78,6 +78,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.3,
     },
+    {
+      url: `${siteUrl}/feed.xml`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.4,
+    },
     ...topTabEntries,
   ];
 

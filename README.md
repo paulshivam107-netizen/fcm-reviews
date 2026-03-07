@@ -44,6 +44,7 @@ Set:
 - `ADSENSE_SLOT_TOP_BANNER` (AdSense slot id for top banner)
 - `ADSENSE_SLOT_IN_FEED` (AdSense slot id for in-feed unit)
 - `ADSENSE_SLOT_FOOTER_STICKY` (AdSense slot id for footer unit)
+- `NEXT_PUBLIC_GSC_VERIFICATION` (optional Google Search Console verification token)
 
 3. Start dev server:
 
@@ -85,6 +86,12 @@ npm run dev
   - latest review feed (Reddit + approved user submissions)
 - Ad runtime config endpoint (`GET /api/ads/config`) for dark-launch ad controls
 - Ad slots (top, in-feed, footer) with live serving gate + preview placeholders
+- SEO crawl pages:
+  - `/top/attacker`
+  - `/top/midfielder`
+  - `/top/defender`
+  - `/top/goalkeeper`
+  - `/feed.xml` (latest approved reviews RSS)
 - Legal pages:
   - `/terms`
   - `/privacy`
@@ -103,6 +110,17 @@ Basic product analytics are recorded via `POST /api/track` into
 `public.app_event_logs` (searches, card opens, submissions, moderation actions).
 
 Ad configuration is served via `GET /api/ads/config`, sourced from server env vars.
+
+## SEO operations
+
+- Technical SEO is now wired:
+  - canonical metadata
+  - robots + sitemap
+  - FAQ structured data on home
+  - top-position crawl pages
+  - RSS feed at `/feed.xml`
+  - `ugc nofollow` on user-submitted source links
+- Use `/docs/seo-launch-checklist.md` as the week-by-week launch checklist.
 
 ## Production recovery runbook
 
