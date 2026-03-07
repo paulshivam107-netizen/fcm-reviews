@@ -795,7 +795,7 @@ export default function HomePage() {
       name: "FC Mobile Reviews",
       url: PUBLIC_SITE_URL,
       description:
-        "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+        "See how FC Mobile player cards actually perform in-game using real community reviews, sentiment, and ratings.",
       inLanguage: "en",
     }),
     []
@@ -1416,13 +1416,11 @@ export default function HomePage() {
           FC Mobile Reviews
         </p>
         <h1 className="text-2xl font-bold leading-tight text-slate-100 sm:text-3xl">
-          Scout The Meta.
-          <span className="block bg-gradient-to-r from-lime-200 to-lime-400 bg-clip-text text-transparent">
-            Pick Better Players.
-          </span>
+          FC Mobile Player Card Reviews
         </h1>
         <p className="mt-2 max-w-[32ch] text-sm text-slate-300">
-          Real community sentiment for the cards people actually use.
+          See how cards actually perform in-game based on real community reviews,
+          sentiment, and ratings.
         </p>
         <div className="mt-4 flex items-center gap-3">
           <button
@@ -1430,10 +1428,10 @@ export default function HomePage() {
             onClick={onOpenGlobalAddReview}
             className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
           >
-            Add Review
+            Add Your Review
           </button>
           <p className="text-xs text-slate-400">
-            Submit for any player card using name + OVR.
+            Submit a review for any player card using player name + OVR.
           </p>
         </div>
         <div className="mt-2 flex items-center gap-3">
@@ -1445,12 +1443,15 @@ export default function HomePage() {
             {isFeedbackPanelOpen ? "Close Feedback" : "Share Feedback"}
           </button>
           <p className="text-xs text-slate-400">
-            Report issues, review quality feedback, or feature suggestions.
+            Report bugs, suggest features, or share feedback on review quality.
           </p>
         </div>
       </header>
 
       <form onSubmit={onSubmitSearch} className="mb-5">
+        <p className="mb-2 text-xs text-slate-300">
+          Search any FC Mobile player card by name and OVR.
+        </p>
         <label htmlFor="player-search" className="sr-only">
           Search players
         </label>

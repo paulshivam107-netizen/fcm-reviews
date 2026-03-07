@@ -12,11 +12,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(getSiteUrl()),
   applicationName: "FC Mobile Reviews",
   title: {
-    default: "FC Mobile Reviews",
+    default: "FC Mobile Player Card Reviews | Community Ratings & Sentiment",
     template: "%s | FC Mobile Reviews",
   },
   description:
-    "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+    "Discover real FC Mobile player card reviews, ratings, and community sentiment. Search cards, compare opinions, and add your own review.",
   keywords: [
     "FC Mobile",
     "FC Mobile reviews",
@@ -41,18 +41,18 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    title: "FC Mobile Reviews",
+    title: "FC Mobile Player Card Reviews | Community Ratings & Sentiment",
     description:
-      "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+      "Discover real FC Mobile player card reviews, ratings, and community sentiment. Search cards, compare opinions, and add your own review.",
     url: "/",
     siteName: "FC Mobile Reviews",
     locale: "en_US",
   },
   twitter: {
     card: "summary",
-    title: "FC Mobile Reviews",
+    title: "FC Mobile Player Card Reviews | Community Ratings & Sentiment",
     description:
-      "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+      "Discover real FC Mobile player card reviews, ratings, and community sentiment. Search cards, compare opinions, and add your own review.",
   },
   verification: {
     google: process.env.NEXT_PUBLIC_GSC_VERIFICATION,
