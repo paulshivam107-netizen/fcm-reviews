@@ -47,6 +47,18 @@ async function fetchActivePlayersForSitemap(): Promise<PlayerSitemapRow[]> {
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const siteUrl = getSiteUrl();
   const now = new Date();
+  const topTabEntries: MetadataRoute.Sitemap = [
+    "attacker",
+    "midfielder",
+    "defender",
+    "goalkeeper",
+  ].map((tab) => ({
+    url: `${siteUrl}/top/${tab}`,
+    lastModified: now,
+    changeFrequency: "hourly" as const,
+    priority: 0.8,
+  }));
+
   const staticEntries: MetadataRoute.Sitemap = [
     {
       url: `${siteUrl}/`,
@@ -66,6 +78,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.3,
     },
+    ...topTabEntries,
   ];
 
   const players = await fetchActivePlayersForSitemap();
