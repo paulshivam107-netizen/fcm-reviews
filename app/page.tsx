@@ -605,7 +605,7 @@ function LatestCommunityReviewsSection({
           {Array.from({ length: 3 }).map((_, index) => (
             <div
               key={`latest-loading-${index}`}
-              className="h-16 animate-pulse rounded-xl border border-white/10 bg-white/5"
+              className="h-14 animate-pulse rounded-xl border border-white/10 bg-white/5"
             />
           ))}
         </div>
@@ -616,15 +616,15 @@ function LatestCommunityReviewsSection({
           {rows.map((row) => (
             <article
               key={`latest-${row.player_id}`}
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold text-slate-100">
                     {row.player_name}
                   </h3>
-                  <p className="mt-0.5 text-xs text-slate-300">
-                    OVR {row.base_ovr} · {row.base_position}
+                  <p className="mt-0.5 text-[11px] text-slate-300">
+                    OVR {row.base_ovr} · {row.base_position} · {row.program_promo}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-lime-200">
                     {formatSentimentWithReviewCount(
@@ -636,22 +636,16 @@ function LatestCommunityReviewsSection({
                     Updated {formatLastProcessedAt(row.last_processed_at)}
                   </p>
                 </div>
-                <span className="shrink-0 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-slate-300">
-                  {row.program_promo}
-                </span>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => onAddReview(row)}
-                  className="rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+                  className="shrink-0 rounded-lg border border-lime-300/30 bg-lime-300/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
                 >
-                  Add Your Review
+                  Add Review
                 </button>
                 <Link
                   href={`/player/${row.player_id}`}
-                  className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                  className="shrink-0 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
                 >
                   View Card
                 </Link>
@@ -907,6 +901,7 @@ export default function HomePage() {
   const [latestRows, setLatestRows] = useState<PlayerRow[]>([]);
   const [latestState, setLatestState] = useState<FetchState>("idle");
   const [latestError, setLatestError] = useState<string | null>(null);
+  const [isFaqOpen, setIsFaqOpen] = useState(false);
 
   const tabList = useMemo(
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
@@ -1650,42 +1645,9 @@ export default function HomePage() {
         </div>
       </form>
 
-      <LatestCommunityReviewsSection
-        rows={latestRows}
-        state={latestState}
-        error={latestError}
-        onAddReview={onSelectPlayerForReview}
-      />
-
-      <AdSlot
-        slotKey="top_banner"
-        placement="Top Banner (320x50 / 300x250)"
-        config={adsConfig}
-        className="mb-5"
-      />
-
-      <section className="glass-panel mb-5 rounded-2xl p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-          Crawlable Top Lists
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {tabList.map((tab) => (
-            <Link
-              key={`top-link-${tab}`}
-              href={`/top/${tab}`}
-              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200 transition hover:bg-white/10"
-            >
-              Top {TAB_LABELS[tab]}
-            </Link>
-          ))}
-        </div>
-        <h2 className="mt-3 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
-          {TAB_SEO_COPY[activeTab].heading}
-        </h2>
-        <p className="mt-1 text-xs leading-relaxed text-slate-300">
-          {TAB_SEO_COPY[activeTab].description}
-        </p>
-      </section>
+      <p className="mb-2 text-xs text-slate-300">
+        Browse top community-rated players by position.
+      </p>
 
       <nav
         className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto overflow-y-visible pb-2"
@@ -1745,7 +1707,7 @@ export default function HomePage() {
                   onAddReview={onSelectPlayerForReview}
                 />
               )}
-              {index === 2 && (
+              {index === 3 && (
                 <AdSlot
                   slotKey="in_feed"
                   placement="In-feed (300x250)"
@@ -2172,32 +2134,94 @@ export default function HomePage() {
       )}
 
       <AdSlot
+        slotKey="top_banner"
+        placement="Top Banner (320x50 / 300x250)"
+        config={adsConfig}
+        className="mb-5"
+      />
+
+      <LatestCommunityReviewsSection
+        rows={latestRows}
+        state={latestState}
+        error={latestError}
+        onAddReview={onSelectPlayerForReview}
+      />
+
+      <section className="glass-panel mb-5 rounded-2xl p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+          Crawlable Top Lists
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {tabList.map((tab) => (
+            <Link
+              key={`top-link-${tab}`}
+              href={`/top/${tab}`}
+              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200 transition hover:bg-white/10"
+            >
+              Top {TAB_LABELS[tab]}
+            </Link>
+          ))}
+        </div>
+        <h2 className="mt-3 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+          {TAB_SEO_COPY[activeTab].heading}
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-300">
+          {TAB_SEO_COPY[activeTab].description}
+        </p>
+      </section>
+
+      <AdSlot
         slotKey="footer_sticky"
         placement="Footer Sticky (320x50)"
         config={adsConfig}
         className="mt-6"
       />
       <section className="glass-panel mt-6 rounded-2xl p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-          FAQ
-        </p>
-        <h2 className="mt-2 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
-          FC Mobile Reviews: How It Works
-        </h2>
-        <div className="mt-3 space-y-3">
-          {HOMEPAGE_FAQ.map((entry) => (
-            <details
-              key={entry.question}
-              className="group rounded-xl border border-white/10 bg-white/5 px-3 py-3"
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-100 [&::-webkit-details-marker]:hidden">
-                <span>{entry.question}</span>
-                <span className="text-slate-400 transition group-open:rotate-45">+</span>
-              </summary>
-              <p className="mt-2 text-xs leading-relaxed text-slate-300">{entry.answer}</p>
-            </details>
-          ))}
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsFaqOpen((current) => !current)}
+          aria-expanded={isFaqOpen}
+          aria-controls="homepage-faq-content"
+          className="flex w-full items-start justify-between gap-3 text-left"
+        >
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+              FAQ
+            </p>
+            <h2 className="mt-2 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+              FC Mobile Reviews: How It Works
+            </h2>
+          </div>
+          <span
+            className={[
+              "rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-300 transition-transform duration-200",
+              isFaqOpen ? "rotate-45" : "",
+            ].join(" ")}
+            aria-hidden
+          >
+            +
+          </span>
+        </button>
+        {isFaqOpen && (
+          <div id="homepage-faq-content" className="mt-3 space-y-3">
+            {HOMEPAGE_FAQ.map((entry) => (
+              <details
+                key={entry.question}
+                className="group rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-100 [&::-webkit-details-marker]:hidden">
+                  <span>{entry.question}</span>
+                  <span className="text-slate-400 transition group-open:rotate-45">
+                    +
+                  </span>
+                </summary>
+                <p className="mt-2 text-xs leading-relaxed text-slate-300">
+                  {entry.answer}
+                </p>
+              </details>
+            ))}
+          </div>
+        )}
       </section>
       <LegalFooter />
     </main>
