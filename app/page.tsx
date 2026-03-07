@@ -64,6 +64,14 @@ type FeedbackFormState = {
   honeypot: string;
 };
 
+type LatestCommunityReviewsApiResponse = {
+  items: PlayerRow[];
+  meta: {
+    count: number;
+    limit: number;
+  };
+};
+
 const RANK_OPTIONS = ["", "Base", "Blue", "Purple", "Red", "Gold"] as const;
 const FEEDBACK_CATEGORY_OPTIONS: Array<{
   value: UserFeedbackCategory;
@@ -88,6 +96,7 @@ const FEEDBACK_CATEGORY_OPTIONS: Array<{
 ];
 const CLIENT_FETCH_TIMEOUT_MS = 6000;
 const AD_CONFIG_FETCH_TIMEOUT_MS = 4500;
+const LATEST_REVIEWS_LIMIT = 6;
 const ADS_PLACEHOLDER_PREVIEW =
   process.env.NEXT_PUBLIC_ENABLE_AD_SLOTS === "true";
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
@@ -154,6 +163,21 @@ const TAB_SEO_COPY: Record<PlayerTab, { heading: string; description: string }> 
 function formatSentiment(score: number | null) {
   if (score === null || Number.isNaN(score)) return "N/A";
   return `${score.toFixed(1)}/10`;
+}
+
+function formatReviewCount(count: number | null | undefined) {
+  if (!Number.isFinite(count ?? NaN)) return "Review count unavailable";
+  const safeCount = Math.max(0, Number(count));
+  if (safeCount === 1) return "1 review";
+  if (safeCount > 1) return `${safeCount} reviews`;
+  return "No reviews yet";
+}
+
+function formatSentimentWithReviewCount(
+  score: number | null,
+  count: number | null | undefined
+) {
+  return `${formatSentiment(score)} · ${formatReviewCount(count)}`;
 }
 
 function formatLastProcessedAt(timestamp: string | null) {
@@ -522,7 +546,10 @@ function PlayerCard({
             Sentiment
           </p>
           <p className="mt-1 text-sm font-semibold text-lime-300">
-            {formatSentiment(row.avg_sentiment_score)}
+            {formatSentimentWithReviewCount(
+              row.avg_sentiment_score,
+              row.mention_count
+            )}
           </p>
         </div>
         <StarMeter score={row.avg_sentiment_score} />
@@ -538,7 +565,7 @@ function PlayerCard({
             }}
             className="rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
           >
-            Add Review
+            Add Your Review
           </button>
           <Link
             href={`/player/${row.player_id}`}
@@ -550,6 +577,102 @@ function PlayerCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function LatestCommunityReviewsSection({
+  rows,
+  state,
+  error,
+  onAddReview,
+}: {
+  rows: PlayerRow[];
+  state: FetchState;
+  error: string | null;
+  onAddReview: (player: PlayerRow) => void;
+}) {
+  return (
+    <section className="glass-panel mb-5 rounded-2xl p-4">
+      <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+        Latest Community Reviews
+      </h2>
+      <p className="mt-1 text-xs leading-relaxed text-slate-300">
+        See the newest player cards reviewed by the FC Mobile community.
+      </p>
+
+      {state === "loading" && (
+        <div className="mt-3 space-y-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={`latest-loading-${index}`}
+              className="h-16 animate-pulse rounded-xl border border-white/10 bg-white/5"
+            />
+          ))}
+        </div>
+      )}
+
+      {state !== "loading" && (
+        <div className="mt-3 space-y-2">
+          {rows.map((row) => (
+            <article
+              key={`latest-${row.player_id}`}
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-slate-100">
+                    {row.player_name}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-300">
+                    OVR {row.base_ovr} · {row.base_position}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-lime-200">
+                    {formatSentimentWithReviewCount(
+                      row.avg_sentiment_score,
+                      row.mention_count
+                    )}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Updated {formatLastProcessedAt(row.last_processed_at)}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-slate-300">
+                  {row.program_promo}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onAddReview(row)}
+                  className="rounded-xl border border-lime-300/35 bg-lime-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+                >
+                  Add Your Review
+                </button>
+                <Link
+                  href={`/player/${row.player_id}`}
+                  className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                >
+                  View Card
+                </Link>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {state === "error" && (
+        <p className="mt-3 text-xs text-rose-200">
+          Could not load latest activity right now. {error ?? "Please retry shortly."}
+        </p>
+      )}
+
+      {state !== "loading" && rows.length === 0 && (
+        <p className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-300">
+          No recent community reviews yet — be the first to add one.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -781,6 +904,9 @@ export default function HomePage() {
   const [adsConfig, setAdsConfig] = useState<AdsRuntimeConfig>(
     buildDefaultAdsConfig
   );
+  const [latestRows, setLatestRows] = useState<PlayerRow[]>([]);
+  const [latestState, setLatestState] = useState<FetchState>("idle");
+  const [latestError, setLatestError] = useState<string | null>(null);
 
   const tabList = useMemo(
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
@@ -795,7 +921,7 @@ export default function HomePage() {
       name: "FC Mobile Reviews",
       url: PUBLIC_SITE_URL,
       description:
-        "Community FC Mobile player reviews and sentiment to compare cards quickly.",
+        "See how FC Mobile player cards actually perform in-game using real community reviews, sentiment, and ratings.",
       inLanguage: "en",
     }),
     []
@@ -925,6 +1051,60 @@ export default function HomePage() {
       clearTimeout(timeoutId);
     };
   }, [isHydrated, activeTab, query]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      CLIENT_FETCH_TIMEOUT_MS
+    );
+
+    async function loadLatest() {
+      setLatestState("loading");
+      setLatestError(null);
+
+      try {
+        const params = new URLSearchParams({
+          limit: String(LATEST_REVIEWS_LIMIT),
+        });
+        const response = await fetch(
+          `/api/latest-community-reviews?${params.toString()}`,
+          {
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`);
+        }
+
+        const payload = (await response.json()) as LatestCommunityReviewsApiResponse;
+        if (!cancelled) {
+          setLatestRows(payload.items);
+          setLatestState("success");
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setLatestRows([]);
+        setLatestState("error");
+        if (error instanceof Error && error.name === "AbortError") {
+          setLatestError("Request timed out.");
+          return;
+        }
+        setLatestError(error instanceof Error ? error.message : "Unknown error");
+      }
+    }
+
+    void loadLatest();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [isHydrated]);
 
   useEffect(() => {
     const playerId = selectedInsightPlayer?.player_id;
@@ -1416,13 +1596,11 @@ export default function HomePage() {
           FC Mobile Reviews
         </p>
         <h1 className="text-2xl font-bold leading-tight text-slate-100 sm:text-3xl">
-          Scout The Meta.
-          <span className="block bg-gradient-to-r from-lime-200 to-lime-400 bg-clip-text text-transparent">
-            Pick Better Players.
-          </span>
+          FC Mobile Player Card Reviews
         </h1>
         <p className="mt-2 max-w-[32ch] text-sm text-slate-300">
-          Real community sentiment for the cards people actually use.
+          See how cards actually perform in-game based on real community reviews,
+          sentiment, and ratings.
         </p>
         <div className="mt-4 flex items-center gap-3">
           <button
@@ -1430,10 +1608,10 @@ export default function HomePage() {
             onClick={onOpenGlobalAddReview}
             className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
           >
-            Add Review
+            Add Your Review
           </button>
           <p className="text-xs text-slate-400">
-            Submit for any player card using name + OVR.
+            Submit a review for any player card using player name + OVR.
           </p>
         </div>
         <div className="mt-2 flex items-center gap-3">
@@ -1445,12 +1623,15 @@ export default function HomePage() {
             {isFeedbackPanelOpen ? "Close Feedback" : "Share Feedback"}
           </button>
           <p className="text-xs text-slate-400">
-            Report issues, review quality feedback, or feature suggestions.
+            Report bugs, suggest features, or share feedback on review quality.
           </p>
         </div>
       </header>
 
       <form onSubmit={onSubmitSearch} className="mb-5">
+        <p className="mb-2 text-xs text-slate-300">
+          Search any FC Mobile player card by name and OVR.
+        </p>
         <label htmlFor="player-search" className="sr-only">
           Search players
         </label>
@@ -1469,12 +1650,42 @@ export default function HomePage() {
         </div>
       </form>
 
+      <LatestCommunityReviewsSection
+        rows={latestRows}
+        state={latestState}
+        error={latestError}
+        onAddReview={onSelectPlayerForReview}
+      />
+
       <AdSlot
         slotKey="top_banner"
         placement="Top Banner (320x50 / 300x250)"
         config={adsConfig}
         className="mb-5"
       />
+
+      <section className="glass-panel mb-5 rounded-2xl p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+          Crawlable Top Lists
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {tabList.map((tab) => (
+            <Link
+              key={`top-link-${tab}`}
+              href={`/top/${tab}`}
+              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200 transition hover:bg-white/10"
+            >
+              Top {TAB_LABELS[tab]}
+            </Link>
+          ))}
+        </div>
+        <h2 className="mt-3 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+          {TAB_SEO_COPY[activeTab].heading}
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-300">
+          {TAB_SEO_COPY[activeTab].description}
+        </p>
+      </section>
 
       <nav
         className="soft-scrollbar mb-6 flex snap-x gap-2 overflow-x-auto overflow-y-visible pb-2"
@@ -1499,29 +1710,6 @@ export default function HomePage() {
           );
         })}
       </nav>
-
-      <section className="glass-panel mb-5 rounded-2xl p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-          Crawlable Top Lists
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {tabList.map((tab) => (
-            <Link
-              key={`top-link-${tab}`}
-              href={`/top/${tab}`}
-              className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-200 transition hover:bg-white/10"
-            >
-              Top {TAB_LABELS[tab]}
-            </Link>
-          ))}
-        </div>
-        <h2 className="mt-3 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
-          {TAB_SEO_COPY[activeTab].heading}
-        </h2>
-        <p className="mt-1 text-xs leading-relaxed text-slate-300">
-          {TAB_SEO_COPY[activeTab].description}
-        </p>
-      </section>
 
       {!isSubmissionPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}
