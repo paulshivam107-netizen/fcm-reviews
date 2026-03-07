@@ -673,7 +673,7 @@ function InsightPanel({
                   <a
                     href={review.sourceUrl}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="ugc nofollow noopener noreferrer"
                     className="mt-2 inline-block text-xs font-medium text-lime-200 underline-offset-2 hover:underline"
                   >
                     Open source

@@ -331,7 +331,7 @@ export default function PlayerDetailPage() {
                   <a
                     href={review.sourceUrl}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="ugc nofollow noopener noreferrer"
                     className="mt-3 inline-block text-xs font-medium text-lime-200 underline-offset-2 hover:underline"
                   >
                     Open source
