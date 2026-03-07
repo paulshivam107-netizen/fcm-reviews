@@ -1523,25 +1523,6 @@ export default function HomePage() {
         </p>
       </section>
 
-      <section className="glass-panel mb-5 rounded-2xl p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-          FAQ
-        </p>
-        <h2 className="mt-2 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
-          FC Mobile Reviews: How It Works
-        </h2>
-        <div className="mt-3 space-y-3">
-          {HOMEPAGE_FAQ.map((entry) => (
-            <article key={entry.question} className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-100">
-                {entry.question}
-              </h3>
-              <p className="mt-1 text-xs leading-relaxed text-slate-300">{entry.answer}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       {!isSubmissionPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}
 
@@ -2008,6 +1989,28 @@ export default function HomePage() {
         config={adsConfig}
         className="mt-6"
       />
+      <section className="glass-panel mt-6 rounded-2xl p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-lime-200">
+          FAQ
+        </p>
+        <h2 className="mt-2 text-sm font-semibold uppercase tracking-[0.08em] text-slate-100">
+          FC Mobile Reviews: How It Works
+        </h2>
+        <div className="mt-3 space-y-3">
+          {HOMEPAGE_FAQ.map((entry) => (
+            <details
+              key={entry.question}
+              className="group rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-100 [&::-webkit-details-marker]:hidden">
+                <span>{entry.question}</span>
+                <span className="text-slate-400 transition group-open:rotate-45">+</span>
+              </summary>
+              <p className="mt-2 text-xs leading-relaxed text-slate-300">{entry.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
       <LegalFooter />
     </main>
   );
