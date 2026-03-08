@@ -636,13 +636,6 @@ function LatestCommunityReviewsSection({
                     Updated {formatLastProcessedAt(row.last_processed_at)}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onAddReview(row)}
-                  className="shrink-0 rounded-lg border border-lime-300/30 bg-lime-300/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
-                >
-                  Add Review
-                </button>
                 <Link
                   href={`/player/${row.player_id}`}
                   className="shrink-0 rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
@@ -650,6 +643,13 @@ function LatestCommunityReviewsSection({
                   View Card
                 </Link>
               </div>
+              <button
+                type="button"
+                onClick={() => onAddReview(row)}
+                className="mt-2 text-[11px] font-medium text-lime-200 underline-offset-2 hover:underline"
+              >
+                Add your review for this card
+              </button>
             </article>
           ))}
         </div>
@@ -1673,6 +1673,8 @@ export default function HomePage() {
         })}
       </nav>
 
+      <p className="mb-3 text-xs text-slate-300">{TAB_SEO_COPY[activeTab].heading}</p>
+
       {!isSubmissionPanelOpen && <section className="space-y-3">
         {state === "loading" && <LoadingCards />}
 
@@ -2133,13 +2135,6 @@ export default function HomePage() {
         </section>
       )}
 
-      <AdSlot
-        slotKey="top_banner"
-        placement="Top Banner (320x50 / 300x250)"
-        config={adsConfig}
-        className="mb-5"
-      />
-
       <LatestCommunityReviewsSection
         rows={latestRows}
         state={latestState}
@@ -2169,6 +2164,13 @@ export default function HomePage() {
           {TAB_SEO_COPY[activeTab].description}
         </p>
       </section>
+
+      <AdSlot
+        slotKey="top_banner"
+        placement="Top Banner (320x50 / 300x250)"
+        config={adsConfig}
+        className="mb-5"
+      />
 
       <AdSlot
         slotKey="footer_sticky"
