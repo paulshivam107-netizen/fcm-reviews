@@ -160,9 +160,9 @@ function buildAddReviewHref(player: PlayerRow) {
 
 function buildCompareHref(player: PlayerRow) {
   const params = new URLSearchParams({
-    tab: getPlayerTabForPosition(player.base_position),
+    left: player.player_id,
   });
-  return `/?${params.toString()}#search`;
+  return `/compare?${params.toString()}`;
 }
 
 function QuickRecommendCard({ playerId }: { playerId: string }) {
