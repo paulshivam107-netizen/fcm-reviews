@@ -902,6 +902,7 @@ export default function HomePage() {
   const [latestState, setLatestState] = useState<FetchState>("idle");
   const [latestError, setLatestError] = useState<string | null>(null);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
+  const addReviewIntentHandledRef = useRef(false);
 
   const tabList = useMemo(
     () => Object.keys(POSITION_GROUPS).map((tab) => parseTab(tab)),
@@ -985,6 +986,49 @@ export default function HomePage() {
       clearTimeout(timeoutId);
     };
   }, [isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated || addReviewIntentHandledRef.current) return;
+    addReviewIntentHandledRef.current = true;
+
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("addReview") !== "1") return;
+
+    const playerName = String(searchParams.get("playerName") ?? "").trim();
+    const playerOvr = String(searchParams.get("playerOvr") ?? "").trim();
+    const eventName = String(searchParams.get("eventName") ?? "").trim();
+    const requestedPosition = normalizePositionInput(
+      String(searchParams.get("playedPosition") ?? "")
+    );
+    const defaultPosition = DEFAULT_REVIEW_POSITION_BY_TAB[activeTab];
+    const prefilledPosition = requestedPosition || defaultPosition;
+
+    setIsFeedbackPanelOpen(false);
+    setFeedbackResult(null);
+    setFeedbackCaptchaToken("");
+    setSelectedPlayer(null);
+    setReviewForm(
+      buildInitialReviewForm(prefilledPosition, {
+        playerName,
+        playerOvr,
+        eventName,
+      })
+    );
+    setReviewFeedback(null);
+    setCaptchaToken("");
+    setCaptchaRenderKey((current) => current + 1);
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("addReview");
+      url.searchParams.delete("playerName");
+      url.searchParams.delete("playerOvr");
+      url.searchParams.delete("eventName");
+      url.searchParams.delete("playedPosition");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, [activeTab, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
