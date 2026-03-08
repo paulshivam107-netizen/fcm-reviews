@@ -171,7 +171,7 @@ export default function PlayerDetailPage() {
   }, [playerId, validPlayerId]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
+    <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-28 pt-7 sm:px-6 sm:pb-12">
       <header className="mb-5">
         <Link
           href="/"
@@ -370,6 +370,19 @@ export default function PlayerDetailPage() {
       )}
 
       <LegalFooter />
+
+      {state === "success" && player && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 bg-gradient-to-t from-slate-950/95 via-slate-950/70 to-transparent px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:hidden">
+          <div className="pointer-events-auto mx-auto w-full max-w-screen-sm">
+            <Link
+              href={buildAddReviewHref(player)}
+              className="block rounded-xl border border-lime-300/35 bg-lime-300/14 px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/22"
+            >
+              Add Your Review
+            </Link>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
