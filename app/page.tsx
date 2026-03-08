@@ -902,6 +902,7 @@ export default function HomePage() {
   const [latestState, setLatestState] = useState<FetchState>("idle");
   const [latestError, setLatestError] = useState<string | null>(null);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
+  const browseIntentHandledRef = useRef(false);
   const addReviewIntentHandledRef = useRef(false);
 
   const tabList = useMemo(
@@ -948,6 +949,36 @@ export default function HomePage() {
   useEffect(() => {
     setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!isHydrated || browseIntentHandledRef.current) return;
+    browseIntentHandledRef.current = true;
+
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const requestedTab = searchParams.get("tab");
+    const requestedQuery = String(searchParams.get("q") ?? "").trim();
+
+    let shouldReplaceUrl = false;
+
+    if (requestedTab) {
+      setActiveTab(parseTab(requestedTab));
+      shouldReplaceUrl = true;
+    }
+
+    if (requestedQuery) {
+      setQueryDraft(requestedQuery);
+      setQuery(requestedQuery);
+      shouldReplaceUrl = true;
+    }
+
+    if (shouldReplaceUrl) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("tab");
+      url.searchParams.delete("q");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, [isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -1667,7 +1698,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <form onSubmit={onSubmitSearch} className="mb-5">
+      <form id="search" onSubmit={onSubmitSearch} className="mb-5">
         <p className="mb-2 text-xs text-slate-300">
           Search any FC Mobile player card by name and OVR.
         </p>
