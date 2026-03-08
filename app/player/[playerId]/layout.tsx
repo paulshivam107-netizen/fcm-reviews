@@ -156,7 +156,7 @@ export async function generateMetadata({
 
   if (!player.hasApprovedReviews) {
     return {
-      title: `${player.player_name} ${player.base_ovr} ${player.base_position}`,
+      title: `${player.player_name} ${player.base_ovr} ${player.base_position} Review – FC Mobile Reviews`,
       description: "No approved reviews published for this card yet.",
       robots: {
         index: false,
@@ -172,7 +172,7 @@ export async function generateMetadata({
   const sentiment = Number(player.avg_sentiment_score ?? NaN);
   const sentimentText = Number.isFinite(sentiment) ? `${sentiment.toFixed(1)}/10` : "N/A";
 
-  const title = `${player.player_name} ${player.base_ovr} ${player.base_position} Review`;
+  const title = `${player.player_name} ${player.base_ovr} ${player.base_position} Review – FC Mobile Reviews`;
   const description =
     `${player.program_promo} card. Community sentiment ${sentimentText}` +
     ` from ${mentionCount} approved review${mentionCount === 1 ? "" : "s"}.`;
