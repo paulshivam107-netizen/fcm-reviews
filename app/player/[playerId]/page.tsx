@@ -53,6 +53,17 @@ function sourceBadgeClass(source: PlayerReviewFeedItem["sourcePlatform"]) {
     : "border-sky-300/40 bg-sky-300/12 text-sky-100";
 }
 
+function buildAddReviewHref(player: PlayerRow) {
+  const params = new URLSearchParams({
+    addReview: "1",
+    playerName: player.player_name,
+    playerOvr: String(player.base_ovr),
+    eventName: player.program_promo,
+    playedPosition: player.base_position,
+  });
+  return `/?${params.toString()}`;
+}
+
 export default function PlayerDetailPage() {
   const params = useParams<{ playerId: string }>();
   const playerId = String(params?.playerId ?? "").trim();
@@ -278,6 +289,21 @@ export default function PlayerDetailPage() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Link
+                href={buildAddReviewHref(player)}
+                className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20"
+              >
+                Add Your Review
+              </Link>
+              <Link
+                href="/"
+                className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+              >
+                Browse More Cards
+              </Link>
             </div>
           </section>
 
