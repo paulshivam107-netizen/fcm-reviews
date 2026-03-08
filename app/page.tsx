@@ -1675,7 +1675,7 @@ export default function HomePage() {
 
       <p className="mb-3 text-xs text-slate-300">{TAB_SEO_COPY[activeTab].heading}</p>
 
-      {!isSubmissionPanelOpen && <section className="space-y-3">
+      {!isSubmissionPanelOpen && <section className="mb-6 space-y-3">
         {state === "loading" && <LoadingCards />}
 
         {state === "error" && (
