@@ -1,0 +1,13 @@
+create index if not exists idx_cards_primary_position on public.cards (primary_position);
+create index if not exists idx_card_versions_card_id on public.card_versions (card_id);
+create index if not exists idx_card_versions_lookup on public.card_versions (canonical_player_name, ovr, primary_position_snapshot);
+create index if not exists idx_card_versions_source_hash on public.card_versions (source_name, source_content_hash);
+create index if not exists idx_reviews_card_version_id on public.reviews (card_version_id);
+create index if not exists idx_reviews_source_name_published on public.reviews (source_name, published_at desc);
+create index if not exists idx_community_mentions_card_version_id on public.community_mentions (card_version_id);
+create index if not exists idx_community_mentions_platform_published on public.community_mentions (source_platform, published_at desc);
+create index if not exists idx_price_snapshots_card_version_observed on public.price_snapshots (card_version_id, observed_at desc);
+create index if not exists idx_source_pages_source_name_page_type on public.source_pages (source_name, page_type);
+create index if not exists idx_scrape_runs_job_started on public.scrape_runs (job_name, started_at desc);
+create index if not exists idx_scrape_failures_run_id on public.scrape_failures (scrape_run_id);
+create index if not exists idx_entity_aliases_alias_normalized on public.entity_aliases (alias_normalized);
