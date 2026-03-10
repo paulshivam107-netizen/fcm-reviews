@@ -42,6 +42,51 @@ export type AdminRedditImportPublishResponse = {
   message: string;
 };
 
+export type AdminRedditImportQueueItem = {
+  id: string;
+  status: "pending" | "approved" | "rejected";
+  sourceMode: "url" | "text";
+  sourceUrl: string | null;
+  sourceSubreddit: string | null;
+  sourceAuthor: string | null;
+  sourcePublishedAt: string | null;
+  sourceExternalId: string;
+  title: string | null;
+  body: string;
+  playerId: string | null;
+  playerName: string;
+  playerOvr: number;
+  eventName: string | null;
+  playedPosition: string;
+  mentionedRankText: string | null;
+  sentimentScore: number;
+  pros: string[];
+  cons: string[];
+  summary: string | null;
+  confidence: number;
+  needsReview: boolean;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  publishedPlayerId: string | null;
+  refreshed: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminRedditImportQueueResponse = {
+  items: AdminRedditImportQueueItem[];
+  meta: {
+    count: number;
+    status: "pending" | "approved" | "rejected";
+  };
+};
+
+export type AdminRedditImportQueueMutationResponse = {
+  success: boolean;
+  item: AdminRedditImportQueueItem;
+  message: string;
+};
+
 export type RedditWatchlistItem = {
   id: string;
   playerId: string;
@@ -78,4 +123,25 @@ export type RedditWatchlistRunResponse = {
   failedEntries: number;
   refreshed: boolean;
   mode: "admin" | "cron";
+};
+
+export type RedditWatchlistRunHistoryItem = {
+  id: string;
+  status: "running" | "completed" | "partial" | "failed";
+  subreddits: string[];
+  rawCommentsCount: number;
+  processedMentionsCount: number;
+  insertedMentionsCount: number;
+  errorCount: number;
+  errorLog: string | null;
+  pullStartedAt: string | null;
+  pullFinishedAt: string | null;
+  createdAt: string;
+};
+
+export type RedditWatchlistRunHistoryResponse = {
+  items: RedditWatchlistRunHistoryItem[];
+  meta: {
+    count: number;
+  };
 };
