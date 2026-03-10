@@ -10,9 +10,67 @@ import {
   AdminRedditImportQueueResponse,
 } from "@/types/admin-imports";
 
+type SupabaseErrorShape = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
 function normalizeStatus(value: string | null) {
   if (value === "approved" || value === "rejected") return value;
   return "pending";
+}
+
+function parseSupabaseErrorBody(raw: string): SupabaseErrorShape {
+  const match = raw.match(/\{[\s\S]*\}$/);
+  const candidate = match ? match[0] : raw;
+  try {
+    const parsed = JSON.parse(candidate) as SupabaseErrorShape;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getRedditImportQueueStorageError(raw: string) {
+  const parsed = parseSupabaseErrorBody(raw);
+  const combined = [
+    parsed.code ?? "",
+    parsed.message ?? "",
+    parsed.details ?? "",
+    parsed.hint ?? "",
+    raw,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    (combined.includes("pgrst205") &&
+      combined.includes("reddit_import_queue")) ||
+    combined.includes('relation "reddit_import_queue" does not exist')
+  ) {
+    return {
+      error:
+        "Reddit import queue storage is not initialized. Run migration 20260310133000_reddit_import_queue.sql in Supabase SQL editor.",
+      status: 503,
+    };
+  }
+
+  if (
+    combined.includes("42501") ||
+    combined.includes("permission denied") ||
+    combined.includes("insufficient_privilege") ||
+    combined.includes("forbidden")
+  ) {
+    return {
+      error:
+        "Reddit import moderation requires SUPABASE_SERVICE_ROLE_KEY. Update Railway variable and redeploy.",
+      status: 500,
+    };
+  }
+
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -31,6 +89,11 @@ export async function GET(request: NextRequest) {
     };
     return NextResponse.json(response, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditImportQueueStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to fetch Reddit import queue",
@@ -107,6 +170,11 @@ export async function POST(request: NextRequest) {
     };
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditImportQueueStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to queue Reddit import",
@@ -146,6 +214,11 @@ export async function PATCH(request: NextRequest) {
     };
     return NextResponse.json(response);
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditImportQueueStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to review queued import",

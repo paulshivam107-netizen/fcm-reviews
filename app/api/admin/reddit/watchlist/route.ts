@@ -11,10 +11,68 @@ import {
   RedditWatchlistResponse,
 } from "@/types/admin-imports";
 
+type SupabaseErrorShape = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
 function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
   );
+}
+
+function parseSupabaseErrorBody(raw: string): SupabaseErrorShape {
+  const match = raw.match(/\{[\s\S]*\}$/);
+  const candidate = match ? match[0] : raw;
+  try {
+    const parsed = JSON.parse(candidate) as SupabaseErrorShape;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getRedditWatchlistStorageError(raw: string) {
+  const parsed = parseSupabaseErrorBody(raw);
+  const combined = [
+    parsed.code ?? "",
+    parsed.message ?? "",
+    parsed.details ?? "",
+    parsed.hint ?? "",
+    raw,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    (combined.includes("pgrst205") &&
+      combined.includes("reddit_watchlist_entries")) ||
+    combined.includes('relation "reddit_watchlist_entries" does not exist')
+  ) {
+    return {
+      error:
+        "Reddit watchlist storage is not initialized. Run migration 20260310121000_reddit_watchlist_entries.sql in Supabase SQL editor.",
+      status: 503,
+    };
+  }
+
+  if (
+    combined.includes("42501") ||
+    combined.includes("permission denied") ||
+    combined.includes("insufficient_privilege") ||
+    combined.includes("forbidden")
+  ) {
+    return {
+      error:
+        "Reddit watchlist admin tools require SUPABASE_SERVICE_ROLE_KEY. Update Railway variable and redeploy.",
+      status: 500,
+    };
+  }
+
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -29,6 +87,11 @@ export async function GET(request: NextRequest) {
     };
     return NextResponse.json(response, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditWatchlistStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to fetch Reddit watchlist",
@@ -69,6 +132,11 @@ export async function POST(request: NextRequest) {
     };
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditWatchlistStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to save watchlist entry",
@@ -109,6 +177,11 @@ export async function PATCH(request: NextRequest) {
     };
     return NextResponse.json(response);
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditWatchlistStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to update watchlist entry",
@@ -132,6 +205,11 @@ export async function DELETE(request: NextRequest) {
     await deleteRedditWatchlistEntry(id);
     return NextResponse.json({ success: true });
   } catch (error) {
+    const storageError =
+      error instanceof Error ? getRedditWatchlistStorageError(error.message) : null;
+    if (storageError) {
+      return NextResponse.json({ error: storageError.error }, { status: storageError.status });
+    }
     return NextResponse.json(
       {
         error: "Failed to remove watchlist entry",
