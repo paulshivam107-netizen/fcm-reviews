@@ -1499,6 +1499,21 @@ export default function AdminPlayersPage() {
                       >
                         View Card
                       </Link>
+                      <Link
+                        href={{
+                          pathname: "/admin/imports",
+                          query: {
+                            playerId: row.playerId,
+                            playerName: row.playerName,
+                            baseOvr: String(row.baseOvr),
+                            basePosition: row.basePosition,
+                            programPromo: row.programPromo,
+                          },
+                        }}
+                        className="rounded-xl border border-sky-300/35 bg-sky-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-sky-100 transition hover:bg-sky-300/20"
+                      >
+                        Import Reddit
+                      </Link>
                       <button
                         type="button"
                         onClick={() => void openMergePanel(row)}

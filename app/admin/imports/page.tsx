@@ -1,14 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AdminPlayerItem, AdminPlayersListResponse } from "@/types/admin";
 import {
   AdminRedditImportPreview,
   AdminRedditImportPreviewResponse,
-  AdminRedditImportPublishResponse,
+  AdminRedditImportQueueItem,
+  AdminRedditImportQueueMutationResponse,
+  AdminRedditImportQueueResponse,
   RedditWatchlistItem,
   RedditWatchlistMutationResponse,
+  RedditWatchlistRunHistoryItem,
+  RedditWatchlistRunHistoryResponse,
   RedditWatchlistResponse,
   RedditWatchlistRunResponse,
 } from "@/types/admin-imports";
@@ -16,6 +21,7 @@ import {
 type AuthState = "checking" | "authenticated" | "unauthenticated";
 type FetchState = "idle" | "loading" | "success" | "error";
 type SourceMode = "url" | "text";
+type QueueStatus = "pending" | "approved" | "rejected";
 
 type ImportDraft = {
   sourceMode: SourceMode;
@@ -98,7 +104,8 @@ function toInitialDraft(): ImportDraft {
   };
 }
 
-export default function AdminImportsPage() {
+function AdminImportsPageContent() {
+  const searchParams = useSearchParams();
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -111,7 +118,12 @@ export default function AdminImportsPage() {
   const [draft, setDraft] = useState<ImportDraft>(toInitialDraft);
   const [previewState, setPreviewState] = useState<FetchState>("idle");
   const [preview, setPreview] = useState<AdminRedditImportPreview | null>(null);
-  const [isPublishing, setIsPublishing] = useState(false);
+  const [isQueueingImport, setIsQueueingImport] = useState(false);
+  const [queueState, setQueueState] = useState<FetchState>("idle");
+  const [queueStatus, setQueueStatus] = useState<QueueStatus>("pending");
+  const [queueRows, setQueueRows] = useState<AdminRedditImportQueueItem[]>([]);
+  const [queueActionById, setQueueActionById] = useState<Record<string, boolean>>({});
+  const [queueReviewNoteById, setQueueReviewNoteById] = useState<Record<string, string>>({});
 
   const [playerSearchQuery, setPlayerSearchQuery] = useState("");
   const [playerSearchState, setPlayerSearchState] = useState<FetchState>("idle");
@@ -125,11 +137,36 @@ export default function AdminImportsPage() {
   const [isSavingWatchlist, setIsSavingWatchlist] = useState(false);
   const [isRunningWatchlist, setIsRunningWatchlist] = useState(false);
   const [watchlistActionById, setWatchlistActionById] = useState<Record<string, boolean>>({});
+  const [runHistoryState, setRunHistoryState] = useState<FetchState>("idle");
+  const [runHistoryRows, setRunHistoryRows] = useState<RedditWatchlistRunHistoryItem[]>([]);
 
   const selectedPlayerSummary = useMemo(() => {
     if (!selectedPlayer) return null;
     return `${selectedPlayer.playerName} · ${selectedPlayer.baseOvr} · ${selectedPlayer.basePosition}`;
   }, [selectedPlayer]);
+
+  const buildPlayerContextFromParams = () => {
+    const playerId = searchParams.get("playerId");
+    const playerName = String(searchParams.get("playerName") ?? "").trim();
+    const baseOvr = Number.parseInt(searchParams.get("baseOvr") ?? "", 10);
+    const basePosition = String(searchParams.get("basePosition") ?? "").trim();
+    const programPromo = String(searchParams.get("programPromo") ?? "").trim();
+    if (!playerId || !playerName || !Number.isInteger(baseOvr) || !basePosition) {
+      return null;
+    }
+    return {
+      playerId,
+      playerName,
+      baseOvr,
+      basePosition,
+      programPromo,
+      isActive: true,
+      mentionCount: 0,
+      avgSentimentScore: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies AdminPlayerItem;
+  };
 
   const loadWatchlistRowForEdit = (row: RedditWatchlistItem) => {
     setSelectedPlayer({
@@ -221,6 +258,77 @@ export default function AdminImportsPage() {
     }
   };
 
+  const loadQueue = async (status = queueStatus) => {
+    if (authState !== "authenticated") {
+      setQueueRows([]);
+      setQueueState("idle");
+      return;
+    }
+
+    setQueueState("loading");
+    try {
+      const params = new URLSearchParams({ status });
+      const response = await fetch(`/api/admin/reddit/queue?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = payload as AdminRedditImportQueueResponse;
+      setQueueRows(data.items);
+      setQueueState("success");
+    } catch (error) {
+      setQueueRows([]);
+      setQueueState("error");
+      setPageError(
+        error instanceof Error ? error.message : "Failed to load Reddit import queue."
+      );
+    }
+  };
+
+  const loadRunHistory = async () => {
+    if (authState !== "authenticated") {
+      setRunHistoryRows([]);
+      setRunHistoryState("idle");
+      return;
+    }
+
+    setRunHistoryState("loading");
+    try {
+      const response = await fetch("/api/admin/reddit/watchlist/run?limit=10", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = payload as RedditWatchlistRunHistoryResponse;
+      setRunHistoryRows(data.items);
+      setRunHistoryState("success");
+    } catch (error) {
+      setRunHistoryRows([]);
+      setRunHistoryState("error");
+      setPageError(error instanceof Error ? error.message : "Failed to load run history.");
+    }
+  };
+
   useEffect(() => {
     void loadAuth();
   }, []);
@@ -228,6 +336,31 @@ export default function AdminImportsPage() {
   useEffect(() => {
     void loadWatchlist();
   }, [authState]);
+
+  useEffect(() => {
+    void loadQueue();
+  }, [authState, queueStatus]);
+
+  useEffect(() => {
+    void loadRunHistory();
+  }, [authState]);
+
+  useEffect(() => {
+    const playerContext = buildPlayerContextFromParams();
+    if (!playerContext) return;
+
+    setSelectedPlayer(playerContext);
+    setDraft((current) => ({
+      ...current,
+      playerName: current.playerName || playerContext.playerName,
+      playerOvr: current.playerOvr || String(playerContext.baseOvr),
+      eventName: current.eventName || playerContext.programPromo,
+      playedPosition: current.playedPosition || playerContext.basePosition,
+    }));
+    setWatchlistSearchTerms(
+      `${playerContext.baseOvr} ${playerContext.playerName}, ${playerContext.playerName} ${playerContext.baseOvr}, ${playerContext.playerName}`
+    );
+  }, [searchParams]);
 
   const onSubmitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -304,27 +437,28 @@ export default function AdminImportsPage() {
       setPreview(data.preview);
       resetDraftFromPreview(data.preview);
       setPreviewState("success");
-      setFlash("Preview generated. Review the extracted fields before publishing.");
+      setFlash("Preview generated. Review the extracted fields before queueing.");
     } catch (error) {
       setPreviewState("error");
       setPageError(error instanceof Error ? error.message : "Failed to preview import.");
     }
   };
 
-  const onPublishImport = async () => {
+  const onQueueImport = async () => {
     if (!preview) {
-      setPageError("Generate a preview before publishing.");
+      setPageError("Generate a preview before queueing.");
       return;
     }
 
-    setIsPublishing(true);
+    setIsQueueingImport(true);
     setPageError(null);
     setFlash(null);
     try {
-      const response = await fetch("/api/admin/reddit/publish", {
+      const response = await fetch("/api/admin/reddit/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          playerId: selectedPlayer?.playerId ?? preview.playerCandidate?.playerId ?? null,
           sourceMode: preview.sourceMode,
           sourceUrl: preview.sourceUrl,
           sourceSubreddit: draft.subreddit || preview.sourceSubreddit,
@@ -343,6 +477,8 @@ export default function AdminImportsPage() {
           pros: normalizeCsv(draft.prosText),
           cons: normalizeCsv(draft.consText),
           summary: draft.summary || null,
+          confidence: preview.confidence,
+          needsReview: preview.needsReview,
         }),
       });
       const payload = (await response.json()) as unknown;
@@ -357,15 +493,62 @@ export default function AdminImportsPage() {
         throw new Error(message);
       }
 
-      const data = payload as AdminRedditImportPublishResponse;
+      const data = payload as AdminRedditImportQueueMutationResponse;
       setFlash(data.message);
       setPreview(null);
       setDraft(toInitialDraft());
-      void loadWatchlist();
+      await loadQueue();
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Failed to publish import.");
+      setPageError(error instanceof Error ? error.message : "Failed to queue import.");
     } finally {
-      setIsPublishing(false);
+      setIsQueueingImport(false);
+    }
+  };
+
+  const onReviewQueueItem = async (
+    item: AdminRedditImportQueueItem,
+    action: "approve" | "reject"
+  ) => {
+    setQueueActionById((current) => ({ ...current, [item.id]: true }));
+    setPageError(null);
+    setFlash(null);
+    try {
+      const response = await fetch("/api/admin/reddit/queue", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: item.id,
+          action,
+          reviewNote: queueReviewNoteById[item.id] ?? null,
+        }),
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = payload as AdminRedditImportQueueMutationResponse;
+      setQueueRows((current) => current.filter((row) => row.id !== data.item.id));
+      setQueueReviewNoteById((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setFlash(data.message);
+      if (action === "approve") {
+        await Promise.all([loadWatchlist(), loadRunHistory()]);
+      }
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to review queued import.");
+    } finally {
+      setQueueActionById((current) => ({ ...current, [item.id]: false }));
     }
   };
 
@@ -510,7 +693,7 @@ export default function AdminImportsPage() {
       setFlash(
         `Watchlist sync finished. Imported ${data.importedMentions} mention${data.importedMentions === 1 ? "" : "s"} from ${data.discoveredPosts} discovered post${data.discoveredPosts === 1 ? "" : "s"}.`
       );
-      await loadWatchlist();
+      await Promise.all([loadWatchlist(), loadRunHistory(), loadQueue("pending")]);
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Failed to run watchlist sync.");
     } finally {
@@ -623,11 +806,26 @@ export default function AdminImportsPage() {
                 <div>
                   <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">Reddit Import</p>
                   <p className="text-sm text-slate-400">
-                    Paste a Reddit URL or raw text, preview the extracted review, then publish it
-                    into the live Reddit-sourced review surface.
+                    Paste a Reddit URL or raw text, preview the extracted review, then queue it
+                    for explicit approval before it touches live sentiment.
                   </p>
                 </div>
               </div>
+
+              {selectedPlayerSummary && (
+                <div className="mb-4 rounded-2xl border border-lime-300/25 bg-lime-300/8 px-4 py-3 text-sm text-lime-100">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span>Player context: {selectedPlayerSummary}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPlayer(null)}
+                      className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                    >
+                      Clear Context
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={onPreviewImport} className="space-y-4">
                 <div className="flex gap-2">
@@ -717,7 +915,7 @@ export default function AdminImportsPage() {
                       <p className="mt-1 text-sm font-semibold text-slate-100">
                         {preview.playerCandidate
                           ? `${preview.playerCandidate.playerName} · ${preview.playerCandidate.baseOvr}`
-                          : "No confident match"}
+                          : selectedPlayerSummary ?? "No confident match"}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3">
@@ -837,11 +1035,11 @@ export default function AdminImportsPage() {
                   <div className="mt-4 flex gap-3">
                     <button
                       type="button"
-                      onClick={onPublishImport}
-                      disabled={isPublishing}
+                      onClick={onQueueImport}
+                      disabled={isQueueingImport}
                       className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
                     >
-                      {isPublishing ? "Publishing..." : "Publish Reddit Import"}
+                      {isQueueingImport ? "Queueing..." : "Queue for Approval"}
                     </button>
                     {preview.sourceUrl && (
                       <a
@@ -856,6 +1054,175 @@ export default function AdminImportsPage() {
                   </div>
                 </div>
               )}
+            </section>
+
+            <section className="glass-panel mb-6 rounded-2xl p-5">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">
+                    Moderation Queue
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    Review queued Reddit imports before they publish into live sentiment.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["pending", "approved", "rejected"] as QueueStatus[]).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setQueueStatus(status)}
+                      className={[
+                        "rounded-full px-4 py-2 text-sm font-semibold transition",
+                        queueStatus === status
+                          ? "bg-accent-500 text-slate-950"
+                          : "bg-[var(--bg-pill)] text-slate-300 hover:bg-white/10",
+                      ].join(" ")}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {queueState === "loading" && (
+                <p className="text-sm text-slate-400">Loading moderation queue...</p>
+              )}
+
+              {queueState !== "loading" && queueRows.length === 0 && (
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-400">
+                  {queueStatus === "pending"
+                    ? "No queued Reddit imports waiting for review."
+                    : `No ${queueStatus} Reddit imports yet.`}
+                </div>
+              )}
+
+              <div className="grid gap-3">
+                {queueRows.map((item) => {
+                  const isActing = queueActionById[item.id] === true;
+                  return (
+                    <article
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-base font-semibold text-slate-100">
+                            {item.playerName} · {item.playerOvr} · {item.playedPosition}
+                          </p>
+                          <p className="text-sm text-slate-400">
+                            {item.eventName || "Community"} · {item.sourceSubreddit ? `r/${item.sourceSubreddit}` : "Reddit"} · {confidenceLabel(item.confidence)}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Queued {formatWhen(item.createdAt)} · Source published {formatWhen(item.sourcePublishedAt)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {item.needsReview && (
+                            <span className="rounded-full border border-amber-300/35 bg-amber-300/12 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">
+                              Review recommended
+                            </span>
+                          )}
+                          <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">
+                            {item.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {(item.title || item.summary) && (
+                        <div className="mt-3 space-y-2">
+                          {item.title && (
+                            <p className="text-sm font-semibold text-slate-100">{item.title}</p>
+                          )}
+                          {item.summary && (
+                            <p className="text-sm text-slate-300">{item.summary}</p>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-300">
+                        {item.body}
+                      </p>
+
+                      <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                        <p>
+                          <span className="text-slate-500">Sentiment:</span>{" "}
+                          {item.sentimentScore.toFixed(1)}/10
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Rank:</span>{" "}
+                          {item.mentionedRankText || "Not mentioned"}
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Pros:</span>{" "}
+                          {item.pros.length > 0 ? item.pros.join(", ") : "None extracted"}
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Cons:</span>{" "}
+                          {item.cons.length > 0 ? item.cons.join(", ") : "None extracted"}
+                        </p>
+                      </div>
+
+                      <label className="mt-3 block text-xs text-slate-300">
+                        Review note (optional)
+                        <textarea
+                          value={queueReviewNoteById[item.id] ?? item.reviewNote ?? ""}
+                          onChange={(event) =>
+                            setQueueReviewNoteById((current) => ({
+                              ...current,
+                              [item.id]: event.target.value,
+                            }))
+                          }
+                          rows={2}
+                          placeholder="Why you approved or rejected this import."
+                          className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                        />
+                      </label>
+
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        {item.sourceUrl && (
+                          <a
+                            href={item.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                          >
+                            Open Source
+                          </a>
+                        )}
+                        {item.playerId && (
+                          <Link
+                            href={`/player/${item.playerId}`}
+                            className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                          >
+                            View Card
+                          </Link>
+                        )}
+                        {queueStatus === "pending" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void onReviewQueueItem(item, "approve")}
+                              disabled={isActing}
+                              className="rounded-xl border border-lime-300/35 bg-lime-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {isActing ? "Saving..." : "Approve + Publish"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void onReviewQueueItem(item, "reject")}
+                              disabled={isActing}
+                              className="rounded-xl border border-rose-300/35 bg-rose-300/12 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {isActing ? "Saving..." : "Reject"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="glass-panel rounded-2xl p-5">
@@ -1018,9 +1385,103 @@ export default function AdminImportsPage() {
                 ))}
               </div>
             </section>
+
+            <section className="glass-panel mt-6 rounded-2xl p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="mb-1 text-xs uppercase tracking-[0.1em] text-slate-300">
+                    Watchlist Run History
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    Recent controlled polling runs for the Reddit watchlist.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadRunHistory()}
+                  className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-200 transition hover:bg-white/10"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {runHistoryState === "loading" && (
+                <p className="text-sm text-slate-400">Loading recent runs...</p>
+              )}
+
+              {runHistoryState !== "loading" && runHistoryRows.length === 0 && (
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-400">
+                  No watchlist runs recorded yet.
+                </div>
+              )}
+
+              <div className="grid gap-3">
+                {runHistoryRows.map((run) => (
+                  <article
+                    key={run.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-base font-semibold text-slate-100">
+                          {run.status} · {run.insertedMentionsCount} imported
+                        </p>
+                        <p className="mt-1 text-sm text-slate-400">
+                          Subreddits:{" "}
+                          {run.subreddits.length > 0 ? run.subreddits.join(", ") : "Default watchlist"}
+                        </p>
+                        <p className="mt-2 text-xs text-slate-500">
+                          Started {formatWhen(run.pullStartedAt)} · Finished {formatWhen(run.pullFinishedAt)}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">
+                        {run.rawCommentsCount} raw / {run.processedMentionsCount} processed
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-3">
+                      <p>
+                        <span className="text-slate-500">Imported:</span> {run.insertedMentionsCount}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Errors:</span> {run.errorCount}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Created:</span> {formatWhen(run.createdAt)}
+                      </p>
+                    </div>
+                    {run.errorLog && (
+                      <p className="mt-3 rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-sm text-rose-100">
+                        {run.errorLog}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
           </>
         )}
       </div>
     </main>
+  );
+}
+
+export default function AdminImportsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(163,230,53,0.15),_transparent_26%),linear-gradient(120deg,_rgba(8,15,27,0.97),_rgba(3,22,46,0.96)_55%,_rgba(0,30,70,0.92))] px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-5xl">
+            <div className="mb-6 inline-flex rounded-full border border-lime-300/35 bg-lime-300/12 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-lime-200">
+              Admin
+            </div>
+            <section className="glass-panel rounded-3xl border border-white/10 p-6">
+              <p className="text-sm text-slate-300">Loading import tools...</p>
+            </section>
+          </div>
+        </main>
+      }
+    >
+      <AdminImportsPageContent />
+    </Suspense>
   );
 }

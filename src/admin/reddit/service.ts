@@ -5,7 +5,9 @@ import { supabaseRpcRequest } from "@/lib/server/supabase-admin";
 import {
   AdminImportPlayerCandidate,
   AdminRedditImportPreview,
+  AdminRedditImportQueueItem,
   RedditWatchlistItem,
+  RedditWatchlistRunHistoryItem,
   RedditWatchlistRunResponse,
 } from "@/types/admin-imports";
 
@@ -28,6 +30,54 @@ type RedditWatchlistRow = {
   last_result_count: number | null;
   created_at: string;
   updated_at: string;
+};
+
+type RedditImportQueueRow = {
+  id: string;
+  status: "pending" | "approved" | "rejected";
+  source_mode: "url" | "text";
+  source_url: string | null;
+  source_subreddit: string | null;
+  source_author: string | null;
+  source_published_at: string | null;
+  source_external_id: string;
+  source_post_id: string | null;
+  title: string | null;
+  body: string;
+  player_id: string | null;
+  player_name: string;
+  player_ovr: number;
+  event_name: string | null;
+  played_position: string;
+  mentioned_rank_text: string | null;
+  sentiment_score: number;
+  pros: string[] | null;
+  cons: string[] | null;
+  summary: string | null;
+  confidence: number;
+  needs_review: boolean;
+  content_hash: string;
+  raw_payload: Record<string, unknown> | null;
+  review_note: string | null;
+  reviewed_at: string | null;
+  published_player_id: string | null;
+  refreshed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type IngestRunRow = {
+  id: string;
+  status: "running" | "completed" | "partial" | "failed";
+  subreddits: string[] | null;
+  raw_comments_count: number | null;
+  processed_mentions_count: number | null;
+  inserted_mentions_count: number | null;
+  error_count: number | null;
+  error_log: string | null;
+  pull_started_at: string | null;
+  pull_finished_at: string | null;
+  created_at: string;
 };
 
 type RedditSourcePayload = {
@@ -59,6 +109,7 @@ type ExtractedRedditDraft = {
 };
 
 type PublishRedditImportInput = {
+  playerId?: string | null;
   sourceMode: "url" | "text";
   sourceUrl: string | null;
   sourceSubreddit: string | null;
@@ -618,6 +669,75 @@ async function buildSourcePayload(input: {
   throw new Error("Provide either a Reddit URL or raw text.");
 }
 
+function buildImportContentHash(args: {
+  sourceExternalId: string;
+  body: string;
+  playerName: string;
+  playerOvr: number;
+  eventName: string | null;
+  playedPosition: string;
+}) {
+  return sha256(
+    [
+      normalizeLookupKey(args.sourceExternalId),
+      normalizeLookupKey(args.body),
+      normalizeLookupKey(args.playerName),
+      String(args.playerOvr),
+      normalizeLookupKey(args.eventName),
+      normalizePosition(args.playedPosition) ?? "",
+    ].join("|")
+  );
+}
+
+function mapQueueItem(row: RedditImportQueueRow): AdminRedditImportQueueItem {
+  return {
+    id: row.id,
+    status: row.status,
+    sourceMode: row.source_mode,
+    sourceUrl: row.source_url,
+    sourceSubreddit: row.source_subreddit,
+    sourceAuthor: row.source_author,
+    sourcePublishedAt: row.source_published_at,
+    sourceExternalId: row.source_external_id,
+    title: row.title,
+    body: row.body,
+    playerId: row.player_id,
+    playerName: row.player_name,
+    playerOvr: row.player_ovr,
+    eventName: row.event_name,
+    playedPosition: row.played_position,
+    mentionedRankText: row.mentioned_rank_text,
+    sentimentScore: Number(row.sentiment_score),
+    pros: Array.isArray(row.pros) ? row.pros : [],
+    cons: Array.isArray(row.cons) ? row.cons : [],
+    summary: row.summary,
+    confidence: Number(row.confidence ?? 0),
+    needsReview: row.needs_review,
+    reviewNote: row.review_note,
+    reviewedAt: row.reviewed_at,
+    publishedPlayerId: row.published_player_id,
+    refreshed: row.refreshed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapRunHistoryItem(row: IngestRunRow): RedditWatchlistRunHistoryItem {
+  return {
+    id: row.id,
+    status: row.status,
+    subreddits: Array.isArray(row.subreddits) ? row.subreddits : [],
+    rawCommentsCount: Number(row.raw_comments_count ?? 0),
+    processedMentionsCount: Number(row.processed_mentions_count ?? 0),
+    insertedMentionsCount: Number(row.inserted_mentions_count ?? 0),
+    errorCount: Number(row.error_count ?? 0),
+    errorLog: row.error_log,
+    pullStartedAt: row.pull_started_at,
+    pullFinishedAt: row.pull_finished_at,
+    createdAt: row.created_at,
+  };
+}
+
 async function resolveOrCreatePlayer(input: {
   playerId?: string | null;
   playerName: string;
@@ -668,6 +788,48 @@ async function resolveOrCreatePlayer(input: {
   });
 
   return created;
+}
+
+async function findMatchingPlayer(input: {
+  playerId?: string | null;
+  playerName: string;
+  playerOvr: number;
+  eventName: string | null;
+}) {
+  const db = createIngestionDbClient();
+  if (input.playerId) {
+    const rows = await db.select<PlayerRow[]>({
+      table: "players",
+      select: PLAYER_SELECT_FIELDS,
+      filters: {
+        id: `eq.${input.playerId}`,
+      },
+      limit: 1,
+    });
+    if (rows[0]) return rows[0];
+  }
+
+  const rows = await db.select<PlayerRow[]>({
+    table: "players",
+    select: PLAYER_SELECT_FIELDS,
+    filters: {
+      player_name: `ilike.*${input.playerName.replace(/\*/g, "")}*`,
+      base_ovr: `eq.${input.playerOvr}`,
+      is_active: "eq.true",
+    },
+    order: "created_at.desc",
+    limit: 30,
+  });
+
+  const targetName = normalizeLookupKey(input.playerName);
+  const targetEvent = normalizeLookupKey(input.eventName);
+  return (
+    rows.find((row) => {
+      if (normalizeLookupKey(row.player_name) !== targetName) return false;
+      if (!targetEvent) return true;
+      return normalizeLookupKey(row.program_promo) === targetEvent;
+    }) ?? null
+  );
 }
 
 function buildMentionInput(args: {
@@ -835,6 +997,249 @@ export async function previewRedditImport(input: {
   return preview;
 }
 
+export async function queueRedditImport(
+  input: PublishRedditImportInput & {
+    confidence?: number;
+    needsReview?: boolean;
+  }
+) {
+  const playerName = limitString(input.playerName, MAX_PLAYER_NAME_LENGTH);
+  if (!playerName || playerName.length < 2) {
+    throw new Error("playerName must be at least 2 characters.");
+  }
+  if (!Number.isInteger(input.playerOvr) || input.playerOvr < 1 || input.playerOvr > 130) {
+    throw new Error("playerOvr must be an integer between 1 and 130.");
+  }
+
+  const playedPosition = normalizePosition(input.playedPosition);
+  if (!playedPosition) {
+    throw new Error("playedPosition is required.");
+  }
+
+  const sentimentScore = Number(input.sentimentScore);
+  if (!Number.isFinite(sentimentScore) || sentimentScore < 1 || sentimentScore > 10) {
+    throw new Error("sentimentScore must be between 1 and 10.");
+  }
+
+  const matchingPlayer = await findMatchingPlayer({
+    playerId: input.playerId ?? null,
+    playerName,
+    playerOvr: input.playerOvr,
+    eventName: limitString(input.eventName, MAX_EVENT_NAME_LENGTH),
+  });
+
+  const db = createIngestionDbClient();
+  const contentHash = buildImportContentHash({
+    sourceExternalId: input.sourceExternalId,
+    body: normalizeFreeText(input.body),
+    playerName,
+    playerOvr: input.playerOvr,
+    eventName: limitString(input.eventName, MAX_EVENT_NAME_LENGTH),
+    playedPosition,
+  });
+
+  const [row] = await db.upsert<RedditImportQueueRow[]>({
+    table: "reddit_import_queue",
+    values: {
+      status: "pending",
+      source_mode: input.sourceMode,
+      source_url: input.sourceUrl ?? null,
+      source_subreddit: limitString(input.sourceSubreddit, 64),
+      source_author: limitString(input.sourceAuthor, 64),
+      source_published_at: input.sourcePublishedAt ?? null,
+      source_external_id: input.sourceExternalId,
+      source_post_id: input.sourcePostId ?? null,
+      title: limitString(input.title, 240),
+      body: normalizeFreeText(input.body),
+      player_id: matchingPlayer?.id ?? null,
+      player_name: playerName,
+      player_ovr: input.playerOvr,
+      event_name: limitString(input.eventName, MAX_EVENT_NAME_LENGTH),
+      played_position: playedPosition,
+      mentioned_rank_text: normalizeRank(input.mentionedRankText),
+      sentiment_score: Number(sentimentScore.toFixed(2)),
+      pros: sanitizeReviewTagArray({ tags: input.pros, position: playedPosition, max: 5 }),
+      cons: sanitizeReviewTagArray({ tags: input.cons, position: playedPosition, max: 5 }),
+      summary: limitString(input.summary, MAX_SUMMARY_LENGTH),
+      confidence: Math.max(0, Math.min(1, Number((input.confidence ?? 0).toFixed(2)))),
+      needs_review: input.needsReview ?? true,
+      content_hash: contentHash,
+      raw_payload: input.rawPayload ?? { sourceMode: input.sourceMode },
+      review_note: null,
+      reviewed_at: null,
+      published_player_id: null,
+      refreshed: false,
+    },
+    onConflict: "content_hash",
+  });
+
+  return mapQueueItem(row);
+}
+
+export async function listRedditImportQueue(status: "pending" | "approved" | "rejected" = "pending") {
+  const db = createIngestionDbClient();
+  const rows = await db.select<RedditImportQueueRow[]>({
+    table: "reddit_import_queue",
+    select: [
+      "id",
+      "status",
+      "source_mode",
+      "source_url",
+      "source_subreddit",
+      "source_author",
+      "source_published_at",
+      "source_external_id",
+      "source_post_id",
+      "title",
+      "body",
+      "player_id",
+      "player_name",
+      "player_ovr",
+      "event_name",
+      "played_position",
+      "mentioned_rank_text",
+      "sentiment_score",
+      "pros",
+      "cons",
+      "summary",
+      "confidence",
+      "needs_review",
+      "content_hash",
+      "raw_payload",
+      "review_note",
+      "reviewed_at",
+      "published_player_id",
+      "refreshed",
+      "created_at",
+      "updated_at",
+    ].join(","),
+    filters: {
+      status: `eq.${status}`,
+    },
+    order: "created_at.desc",
+    limit: 80,
+  });
+
+  return rows.map(mapQueueItem);
+}
+
+export async function reviewQueuedRedditImport(input: {
+  id: string;
+  action: "approve" | "reject";
+  reviewNote?: string | null;
+}) {
+  const db = createIngestionDbClient();
+  const rows = await db.select<RedditImportQueueRow[]>({
+    table: "reddit_import_queue",
+    select: [
+      "id",
+      "status",
+      "source_mode",
+      "source_url",
+      "source_subreddit",
+      "source_author",
+      "source_published_at",
+      "source_external_id",
+      "source_post_id",
+      "title",
+      "body",
+      "player_id",
+      "player_name",
+      "player_ovr",
+      "event_name",
+      "played_position",
+      "mentioned_rank_text",
+      "sentiment_score",
+      "pros",
+      "cons",
+      "summary",
+      "confidence",
+      "needs_review",
+      "content_hash",
+      "raw_payload",
+      "review_note",
+      "reviewed_at",
+      "published_player_id",
+      "refreshed",
+      "created_at",
+      "updated_at",
+    ].join(","),
+    filters: {
+      id: `eq.${input.id}`,
+    },
+    limit: 1,
+  });
+
+  const queueItem = rows[0];
+  if (!queueItem) {
+    throw new Error("Queued import not found.");
+  }
+  if (queueItem.status !== "pending") {
+    throw new Error("Only pending imports can be reviewed.");
+  }
+
+  const reviewNote = limitString(input.reviewNote, 400);
+  if (input.action === "reject") {
+    const [updated] = await db.update<RedditImportQueueRow[]>({
+      table: "reddit_import_queue",
+      values: {
+        status: "rejected",
+        review_note: reviewNote,
+        reviewed_at: new Date().toISOString(),
+      },
+      filters: {
+        id: `eq.${input.id}`,
+      },
+    });
+    return {
+      item: mapQueueItem(updated),
+      message: "Reddit import rejected.",
+    };
+  }
+
+  const result = await publishRedditImport({
+    playerId: queueItem.player_id,
+    sourceMode: queueItem.source_mode,
+    sourceUrl: queueItem.source_url,
+    sourceSubreddit: queueItem.source_subreddit,
+    sourceAuthor: queueItem.source_author,
+    sourcePublishedAt: queueItem.source_published_at,
+    sourceExternalId: queueItem.source_external_id,
+    sourcePostId: queueItem.source_post_id,
+    title: queueItem.title,
+    body: queueItem.body,
+    playerName: queueItem.player_name,
+    playerOvr: queueItem.player_ovr,
+    eventName: queueItem.event_name,
+    playedPosition: queueItem.played_position,
+    mentionedRankText: queueItem.mentioned_rank_text,
+    sentimentScore: Number(queueItem.sentiment_score),
+    pros: Array.isArray(queueItem.pros) ? queueItem.pros : [],
+    cons: Array.isArray(queueItem.cons) ? queueItem.cons : [],
+    summary: queueItem.summary,
+    rawPayload: queueItem.raw_payload ?? undefined,
+  });
+
+  const [updated] = await db.update<RedditImportQueueRow[]>({
+    table: "reddit_import_queue",
+    values: {
+      status: "approved",
+      review_note: reviewNote,
+      reviewed_at: new Date().toISOString(),
+      published_player_id: result.playerId,
+      refreshed: result.refreshed,
+    },
+    filters: {
+      id: `eq.${input.id}`,
+    },
+  });
+
+  return {
+    item: mapQueueItem(updated),
+    message: "Reddit import approved and published.",
+  };
+}
+
 export async function publishRedditImport(input: PublishRedditImportInput) {
   const playerName = limitString(input.playerName, MAX_PLAYER_NAME_LENGTH);
   if (!playerName || playerName.length < 2) {
@@ -855,6 +1260,7 @@ export async function publishRedditImport(input: PublishRedditImportInput) {
   }
 
   const player = await resolveOrCreatePlayer({
+    playerId: input.playerId ?? null,
     playerName,
     playerOvr: input.playerOvr,
     eventName: limitString(input.eventName, MAX_EVENT_NAME_LENGTH),
@@ -996,6 +1402,33 @@ async function mapWatchlistItems(rows: RedditWatchlistRow[]) {
 export async function listRedditWatchlist() {
   const rows = await getWatchlistRows(false);
   return mapWatchlistItems(rows);
+}
+
+export async function listRedditWatchlistRuns(limit = 12) {
+  const db = createIngestionDbClient();
+  const rows = await db.select<IngestRunRow[]>({
+    table: "ingest_runs",
+    select: [
+      "id",
+      "status",
+      "subreddits",
+      "raw_comments_count",
+      "processed_mentions_count",
+      "inserted_mentions_count",
+      "error_count",
+      "error_log",
+      "pull_started_at",
+      "pull_finished_at",
+      "created_at",
+    ].join(","),
+    filters: {
+      source_platform: `eq.${SOURCE_PLATFORM}`,
+    },
+    order: "pull_started_at.desc.nullslast,created_at.desc",
+    limit: Math.max(1, Math.min(50, limit)),
+  });
+
+  return rows.map(mapRunHistoryItem);
 }
 
 export async function upsertRedditWatchlistEntry(input: {
