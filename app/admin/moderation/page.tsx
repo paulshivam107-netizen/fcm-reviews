@@ -626,6 +626,12 @@ export default function AdminModerationPage() {
             >
               Players
             </Link>
+            <Link
+              href="/admin/imports"
+              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+            >
+              Imports
+            </Link>
           </nav>
 
           <nav className="mb-4 flex gap-2" aria-label="Queue type tabs">
