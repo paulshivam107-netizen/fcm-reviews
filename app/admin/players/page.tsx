@@ -963,6 +963,12 @@ export default function AdminPlayersPage() {
             <span className="rounded-full bg-accent-500 px-4 py-2 text-sm font-semibold text-slate-950">
               Players
             </span>
+            <Link
+              href="/admin/imports"
+              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
+            >
+              Imports
+            </Link>
           </nav>
 
           <section className="glass-panel mb-5 rounded-2xl p-4">
