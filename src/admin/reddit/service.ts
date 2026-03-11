@@ -6,6 +6,7 @@ import {
   AdminImportPlayerCandidate,
   AdminRedditImportPreview,
   AdminRedditImportQueueItem,
+  RedditImportSettings,
   RedditWatchlistItem,
   RedditWatchlistRunHistoryItem,
   RedditWatchlistRunResponse,
@@ -230,6 +231,11 @@ const SOURCE_PLATFORM = "reddit";
 const IMPORT_MODEL = "rule-based-import";
 const IMPORT_MODEL_VERSION = "v1";
 const PLAYER_SELECT_FIELDS = "id,player_name,base_ovr,base_position,program_promo,is_active";
+const REDDIT_IMPORT_SETTINGS_KEY = "reddit_imports";
+const DEFAULT_REDDIT_IMPORT_SETTINGS: RedditImportSettings = {
+  currentMaxBaseOvr: 117,
+  maxRankOvrBoost: 5,
+};
 
 const TAG_KEYWORDS: Record<string, readonly string[]> = {
   Pace: ["pace", "quick", "fast", "acceleration", "speed", "rapid"],
@@ -353,6 +359,87 @@ function extractRankMention(text: string) {
   return null;
 }
 
+function extractHeaderPlayerAndOvr(text: string) {
+  const normalizedText = normalizeFreeText(text);
+  const headerPatterns = [
+    /\b(\d{2,3})\s+([a-z][a-z .'-]{1,48})\s+review\b/i,
+    /\b([a-z][a-z .'-]{1,48})\s+review\b/i,
+  ];
+
+  for (const pattern of headerPatterns) {
+    const match = normalizedText.match(pattern);
+    if (!match) continue;
+
+    if (match.length >= 3) {
+      const ovr = Number.parseInt(match[1], 10);
+      const playerName = limitString(match[2], MAX_PLAYER_NAME_LENGTH);
+      return {
+        playerName,
+        playerOvr: Number.isInteger(ovr) ? ovr : null,
+      };
+    }
+
+    const playerName = limitString(match[1], MAX_PLAYER_NAME_LENGTH);
+    return {
+      playerName,
+      playerOvr: null,
+    };
+  }
+
+  return {
+    playerName: null,
+    playerOvr: null,
+  };
+}
+
+function normalizeRedditImportSettings(
+  value: Record<string, unknown> | null | undefined
+): RedditImportSettings {
+  const currentMaxBaseOvr = Number(value?.currentMaxBaseOvr);
+  const maxRankOvrBoost = Number(value?.maxRankOvrBoost);
+
+  return {
+    currentMaxBaseOvr:
+      Number.isInteger(currentMaxBaseOvr) && currentMaxBaseOvr >= 1 && currentMaxBaseOvr <= 130
+        ? currentMaxBaseOvr
+        : DEFAULT_REDDIT_IMPORT_SETTINGS.currentMaxBaseOvr,
+    maxRankOvrBoost:
+      Number.isInteger(maxRankOvrBoost) && maxRankOvrBoost >= 0 && maxRankOvrBoost <= 20
+        ? maxRankOvrBoost
+        : DEFAULT_REDDIT_IMPORT_SETTINGS.maxRankOvrBoost,
+  };
+}
+
+function normalizeDisplayedOvrToBaseOvr(
+  displayOvr: number | null,
+  settings: RedditImportSettings
+) {
+  if (displayOvr === null || !Number.isInteger(displayOvr)) {
+    return {
+      normalizedBaseOvr: null,
+      normalization: null,
+    };
+  }
+
+  if (displayOvr <= settings.currentMaxBaseOvr) {
+    return {
+      normalizedBaseOvr: displayOvr,
+      normalization: null,
+    };
+  }
+
+  const normalizedBaseOvr = Math.max(1, displayOvr - settings.maxRankOvrBoost);
+  return {
+    normalizedBaseOvr,
+    normalization: {
+      displayOvr,
+      normalizedBaseOvr,
+      currentMaxBaseOvr: settings.currentMaxBaseOvr,
+      maxRankOvrBoost: settings.maxRankOvrBoost,
+    },
+  };
+}
+
 function extractPlayedPosition(text: string, fallback: string | null) {
   const explicitMatch = text.match(/(?:play(?:ing)?(?:\s+him)?\s+as|used\s+him\s+as|at)\s+(ST|CF|LW|RW|LF|RF|CAM|CM|CDM|LM|RM|CB|LB|RB|LWB|RWB|GK)\b/i);
   if (explicitMatch) {
@@ -446,6 +533,8 @@ function scorePlayerCandidate(args: {
   const playerName = normalizeLookupKey(args.player.player_name);
   const programPromo = normalizeLookupKey(args.player.program_promo);
   const nameTokens = playerName.split(" ").filter((token) => token.length > 2);
+  const explicitName = normalizeLookupKey(args.explicitPlayerName);
+  const explicitNameTokens = explicitName.split(" ").filter((token) => token.length > 1);
 
   let score = 0;
   if (playerName && haystack.includes(playerName)) score += 0.62;
@@ -453,15 +542,20 @@ function scorePlayerCandidate(args: {
     0.24,
     nameTokens.filter((token) => haystack.includes(token)).length * 0.08
   );
+  if (explicitName && explicitName === playerName) {
+    score += 0.3;
+  } else if (explicitNameTokens.length > 0) {
+    const matchingExplicitTokens = explicitNameTokens.filter((token) =>
+      nameTokens.includes(token)
+    ).length;
+    score += Math.min(0.22, matchingExplicitTokens * 0.14);
+  }
   if ((args.explicitOvr ?? null) === args.player.base_ovr) score += 0.18;
   if (String(args.player.base_ovr) && haystack.includes(String(args.player.base_ovr))) {
     score += 0.12;
   }
   if (programPromo && haystack.includes(programPromo)) score += 0.08;
-  if (
-    normalizeLookupKey(args.explicitPlayerName) === playerName &&
-    (args.explicitOvr ?? null) === args.player.base_ovr
-  ) {
+  if (explicitName === playerName && (args.explicitOvr ?? null) === args.player.base_ovr) {
     score += 0.3;
   }
   if (
@@ -942,6 +1036,39 @@ async function refreshSentimentSummary() {
   return response.ok;
 }
 
+export async function getRedditImportSettings() {
+  const db = createIngestionDbClient();
+  const rows = await db.select<
+    Array<{
+      key: string;
+      value_json: Record<string, unknown> | null;
+    }>
+  >({
+    table: "admin_runtime_settings",
+    select: "key,value_json",
+    filters: {
+      key: `eq.${REDDIT_IMPORT_SETTINGS_KEY}`,
+    },
+    limit: 1,
+  });
+
+  return normalizeRedditImportSettings(rows[0]?.value_json);
+}
+
+export async function updateRedditImportSettings(input: RedditImportSettings) {
+  const settings = normalizeRedditImportSettings(input as unknown as Record<string, unknown>);
+  const db = createIngestionDbClient();
+  await db.upsert<Array<{ key: string }>>({
+    table: "admin_runtime_settings",
+    values: {
+      key: REDDIT_IMPORT_SETTINGS_KEY,
+      value_json: settings,
+    },
+    onConflict: "key",
+  });
+  return settings;
+}
+
 export async function previewRedditImport(input: {
   sourceUrl?: string | null;
   rawText?: string | null;
@@ -953,10 +1080,20 @@ export async function previewRedditImport(input: {
 }) {
   const source = await buildSourcePayload(input);
   const text = [source.title, source.body].filter(Boolean).join("\n\n");
+  const settings = await getRedditImportSettings();
+  const headerSignals = extractHeaderPlayerAndOvr(text);
+  const explicitPlayerName =
+    limitString(input.playerName, MAX_PLAYER_NAME_LENGTH) ?? headerSignals.playerName;
+  const displayPlayerOvr =
+    typeof input.playerOvr === "number" && Number.isInteger(input.playerOvr)
+      ? input.playerOvr
+      : headerSignals.playerOvr;
+  const ovrNormalization = normalizeDisplayedOvrToBaseOvr(displayPlayerOvr, settings);
+  const explicitPlayerOvr = ovrNormalization.normalizedBaseOvr;
   const candidate = await detectPlayerCandidate({
     text,
-    explicitPlayerName: input.playerName,
-    explicitOvr: input.playerOvr,
+    explicitPlayerName,
+    explicitOvr: explicitPlayerOvr,
     explicitEventName: input.eventName,
     explicitPosition: input.playedPosition,
   });
@@ -974,10 +1111,11 @@ export async function previewRedditImport(input: {
     title: source.title,
     body: source.body,
     playerCandidate: candidate,
-    extractedPlayerName: limitString(input.playerName, MAX_PLAYER_NAME_LENGTH) ?? candidate?.playerName ?? "",
+    ovrNormalization: ovrNormalization.normalization,
+    extractedPlayerName: explicitPlayerName ?? candidate?.playerName ?? "",
     extractedPlayerOvr:
-      typeof input.playerOvr === "number" && Number.isInteger(input.playerOvr)
-        ? input.playerOvr
+      explicitPlayerOvr !== null && Number.isInteger(explicitPlayerOvr)
+        ? explicitPlayerOvr
         : candidate?.baseOvr ?? null,
     extractedEventName: limitString(input.eventName, MAX_EVENT_NAME_LENGTH) ?? candidate?.programPromo ?? null,
     extractedPlayedPosition,

@@ -10,6 +10,8 @@ import {
   AdminRedditImportQueueItem,
   AdminRedditImportQueueMutationResponse,
   AdminRedditImportQueueResponse,
+  RedditImportSettings,
+  RedditImportSettingsResponse,
   RedditWatchlistItem,
   RedditWatchlistMutationResponse,
   RedditWatchlistRunHistoryItem,
@@ -119,6 +121,11 @@ function AdminImportsPageContent() {
   const [previewState, setPreviewState] = useState<FetchState>("idle");
   const [preview, setPreview] = useState<AdminRedditImportPreview | null>(null);
   const [isQueueingImport, setIsQueueingImport] = useState(false);
+  const [importSettingsState, setImportSettingsState] = useState<FetchState>("idle");
+  const [importSettings, setImportSettings] = useState<RedditImportSettings | null>(null);
+  const [currentMaxBaseOvrDraft, setCurrentMaxBaseOvrDraft] = useState("117");
+  const [maxRankOvrBoostDraft, setMaxRankOvrBoostDraft] = useState("5");
+  const [isSavingImportSettings, setIsSavingImportSettings] = useState(false);
   const [queueState, setQueueState] = useState<FetchState>("idle");
   const [queueStatus, setQueueStatus] = useState<QueueStatus>("pending");
   const [queueRows, setQueueRows] = useState<AdminRedditImportQueueItem[]>([]);
@@ -258,6 +265,41 @@ function AdminImportsPageContent() {
     }
   };
 
+  const loadImportSettings = async () => {
+    if (authState !== "authenticated") {
+      setImportSettingsState("idle");
+      setImportSettings(null);
+      return;
+    }
+
+    setImportSettingsState("loading");
+    try {
+      const response = await fetch("/api/admin/reddit/settings", { cache: "no-store" });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = payload as RedditImportSettingsResponse;
+      setImportSettings(data.settings);
+      setCurrentMaxBaseOvrDraft(String(data.settings.currentMaxBaseOvr));
+      setMaxRankOvrBoostDraft(String(data.settings.maxRankOvrBoost));
+      setImportSettingsState("success");
+    } catch (error) {
+      setImportSettingsState("error");
+      setPageError(
+        error instanceof Error ? error.message : "Failed to load Reddit import settings."
+      );
+    }
+  };
+
   const loadQueue = async (status = queueStatus) => {
     if (authState !== "authenticated") {
       setQueueRows([]);
@@ -335,6 +377,10 @@ function AdminImportsPageContent() {
 
   useEffect(() => {
     void loadWatchlist();
+  }, [authState]);
+
+  useEffect(() => {
+    void loadImportSettings();
   }, [authState]);
 
   useEffect(() => {
@@ -701,6 +747,44 @@ function AdminImportsPageContent() {
     }
   };
 
+  const onSaveImportSettings = async () => {
+    setIsSavingImportSettings(true);
+    setPageError(null);
+    setFlash(null);
+    try {
+      const response = await fetch("/api/admin/reddit/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentMaxBaseOvr: Number(currentMaxBaseOvrDraft),
+          maxRankOvrBoost: Number(maxRankOvrBoostDraft),
+        }),
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" &&
+          payload !== null &&
+          "error" in payload &&
+          typeof payload.error === "string"
+            ? payload.error
+            : `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      const data = payload as RedditImportSettingsResponse;
+      setImportSettings(data.settings);
+      setCurrentMaxBaseOvrDraft(String(data.settings.currentMaxBaseOvr));
+      setMaxRankOvrBoostDraft(String(data.settings.maxRankOvrBoost));
+      setFlash("Reddit import normalization settings updated.");
+    } catch (error) {
+      setPageError(
+        error instanceof Error ? error.message : "Failed to save Reddit import settings."
+      );
+    } finally {
+      setIsSavingImportSettings(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(163,230,53,0.15),_transparent_26%),linear-gradient(120deg,_rgba(8,15,27,0.97),_rgba(3,22,46,0.96)_55%,_rgba(0,30,70,0.92))] px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
@@ -810,6 +894,58 @@ function AdminImportsPageContent() {
                     for explicit approval before it touches live sentiment.
                   </p>
                 </div>
+              </div>
+
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="mb-3">
+                  <p className="text-xs uppercase tracking-[0.1em] text-slate-300">
+                    OVR Normalization
+                  </p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    If a Reddit post shows a ranked-up OVR above the current live base OVR ceiling,
+                    normalize it back to base OVR before matching and queueing.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <label className="text-xs text-slate-300">
+                    Current max base OVR
+                    <input
+                      type="number"
+                      min={1}
+                      max={130}
+                      value={currentMaxBaseOvrDraft}
+                      onChange={(event) => setCurrentMaxBaseOvrDraft(event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-300">
+                    Max rank OVR boost
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={maxRankOvrBoostDraft}
+                      onChange={(event) => setMaxRankOvrBoostDraft(event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={onSaveImportSettings}
+                      disabled={isSavingImportSettings || importSettingsState === "loading"}
+                      className="w-full rounded-xl border border-lime-300/35 bg-lime-300/12 px-4 py-3 text-sm font-semibold uppercase tracking-[0.12em] text-lime-200 transition hover:bg-lime-300/20 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {isSavingImportSettings ? "Saving..." : "Save Settings"}
+                    </button>
+                  </div>
+                </div>
+                {importSettings && (
+                  <p className="mt-3 text-xs text-slate-500">
+                    Active rule: displayed OVR above {importSettings.currentMaxBaseOvr} will be
+                    normalized down by {importSettings.maxRankOvrBoost}.
+                  </p>
+                )}
               </div>
 
               {selectedPlayerSummary && (
@@ -931,6 +1067,15 @@ function AdminImportsPageContent() {
                       </p>
                     </div>
                   </div>
+
+                  {preview.ovrNormalization && (
+                    <div className="mb-4 rounded-xl border border-sky-300/25 bg-sky-300/10 px-3 py-3 text-sm text-sky-100">
+                      Detected displayed OVR {preview.ovrNormalization.displayOvr}. Normalized to
+                      base OVR {preview.ovrNormalization.normalizedBaseOvr} using current max base
+                      OVR {preview.ovrNormalization.currentMaxBaseOvr} and rank boost{" "}
+                      {preview.ovrNormalization.maxRankOvrBoost}.
+                    </div>
+                  )}
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="text-xs text-slate-300">
