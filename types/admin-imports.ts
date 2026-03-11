@@ -17,6 +17,14 @@ export type AdminRedditImportPreview = {
   title: string | null;
   body: string;
   playerCandidate: AdminImportPlayerCandidate | null;
+  ovrNormalization:
+    | {
+        displayOvr: number;
+        normalizedBaseOvr: number;
+        currentMaxBaseOvr: number;
+        maxRankOvrBoost: number;
+      }
+    | null;
   extractedPlayerName: string;
   extractedPlayerOvr: number | null;
   extractedEventName: string | null;
@@ -32,6 +40,15 @@ export type AdminRedditImportPreview = {
 
 export type AdminRedditImportPreviewResponse = {
   preview: AdminRedditImportPreview;
+};
+
+export type RedditImportSettings = {
+  currentMaxBaseOvr: number;
+  maxRankOvrBoost: number;
+};
+
+export type RedditImportSettingsResponse = {
+  settings: RedditImportSettings;
 };
 
 export type AdminRedditImportPublishResponse = {
