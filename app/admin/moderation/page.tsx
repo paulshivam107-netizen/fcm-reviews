@@ -1,8 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { AdminAuthShell } from "@/components/admin-auth-shell";
+import { AdminPageHeader } from "@/components/admin-page-header";
+import { AdminSessionBanner } from "@/components/admin-session-banner";
+import { AdminToolsNav } from "@/components/admin-tools-nav";
 import {
   AdminReviewQueueItem,
   AdminReviewQueueResponse,
@@ -566,47 +568,14 @@ export default function AdminModerationPage() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
-      <header className="mb-5">
-        <p className="mb-2 inline-flex items-center rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-lime-200">
-          Admin
-        </p>
-        <h1 className="text-2xl font-bold text-slate-100">Moderation Queue</h1>
-        <p className="mt-2 text-sm text-slate-300">
-          Review user-submitted card reviews and product feedback/suggestions.
-        </p>
-      </header>
+      <AdminPageHeader
+        title="Moderation Queue"
+        description="Review user-submitted card reviews and product feedback/suggestions."
+      />
 
-      <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em] text-slate-400">Signed in</p>
-              <p className="text-sm font-semibold text-slate-100">{adminEmail}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:bg-white/10"
-            >
-              Sign Out
-            </button>
-          </section>
+      <AdminSessionBanner adminEmail={adminEmail} onLogout={onLogout} />
 
-          <nav className="mb-4 flex gap-2" aria-label="Admin tools">
-            <span className="rounded-full bg-accent-500 px-4 py-2 text-sm font-semibold text-slate-950">
-              Moderation
-            </span>
-            <Link
-              href="/admin/players"
-              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
-            >
-              Players
-            </Link>
-            <Link
-              href="/admin/imports"
-              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
-            >
-              Imports
-            </Link>
-          </nav>
+      <AdminToolsNav active="moderation" className="mb-4" />
 
           <nav className="mb-4 flex gap-2" aria-label="Queue type tabs">
             <button
