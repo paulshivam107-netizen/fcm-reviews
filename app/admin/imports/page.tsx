@@ -249,13 +249,23 @@ function AdminImportsPageContent() {
       const response = await fetch("/api/admin/reddit/watchlist", { cache: "no-store" });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        const message =
+        const errorMessage =
           typeof payload === "object" &&
           payload !== null &&
           "error" in payload &&
           typeof payload.error === "string"
             ? payload.error
-            : `Request failed (${response.status})`;
+            : null;
+        const errorDetails =
+          typeof payload === "object" &&
+          payload !== null &&
+          "details" in payload &&
+          typeof payload.details === "string"
+            ? payload.details
+            : null;
+        const message =
+          [errorMessage, errorDetails].filter(Boolean).join(": ") ||
+          `Request failed (${response.status})`;
         throw new Error(message);
       }
 
@@ -281,13 +291,23 @@ function AdminImportsPageContent() {
       const response = await fetch("/api/admin/reddit/settings", { cache: "no-store" });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        const message =
+        const errorMessage =
           typeof payload === "object" &&
           payload !== null &&
           "error" in payload &&
           typeof payload.error === "string"
             ? payload.error
-            : `Request failed (${response.status})`;
+            : null;
+        const errorDetails =
+          typeof payload === "object" &&
+          payload !== null &&
+          "details" in payload &&
+          typeof payload.details === "string"
+            ? payload.details
+            : null;
+        const message =
+          [errorMessage, errorDetails].filter(Boolean).join(": ") ||
+          `Request failed (${response.status})`;
         throw new Error(message);
       }
 
@@ -319,13 +339,23 @@ function AdminImportsPageContent() {
       });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        const message =
+        const errorMessage =
           typeof payload === "object" &&
           payload !== null &&
           "error" in payload &&
           typeof payload.error === "string"
             ? payload.error
-            : `Request failed (${response.status})`;
+            : null;
+        const errorDetails =
+          typeof payload === "object" &&
+          payload !== null &&
+          "details" in payload &&
+          typeof payload.details === "string"
+            ? payload.details
+            : null;
+        const message =
+          [errorMessage, errorDetails].filter(Boolean).join(": ") ||
+          `Request failed (${response.status})`;
         throw new Error(message);
       }
 
@@ -473,13 +503,23 @@ function AdminImportsPageContent() {
       });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        const message =
+        const errorMessage =
           typeof payload === "object" &&
           payload !== null &&
           "error" in payload &&
           typeof payload.error === "string"
             ? payload.error
-            : `Request failed (${response.status})`;
+            : null;
+        const errorDetails =
+          typeof payload === "object" &&
+          payload !== null &&
+          "details" in payload &&
+          typeof payload.details === "string"
+            ? payload.details
+            : null;
+        const message =
+          [errorMessage, errorDetails].filter(Boolean).join(": ") ||
+          `Request failed (${response.status})`;
         throw new Error(message);
       }
 
