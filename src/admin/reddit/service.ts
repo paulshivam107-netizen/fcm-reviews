@@ -1094,6 +1094,10 @@ async function persistImportedMention(args: {
   return { rawCommentId: rawRow?.id ?? null, mentionId: mention?.id ?? null };
 }
 
+async function createAdminImportRun(subreddit: string | null) {
+  return createLegacyIngestRun([subreddit ?? "manual-import"]);
+}
+
 async function refreshSentimentSummary() {
   const response = await supabaseRpcRequest({
     endpoint: "refresh_player_sentiment_summary",
@@ -1471,29 +1475,57 @@ export async function publishRedditImport(input: PublishRedditImportInput) {
     playedPosition,
   });
 
-  await persistImportedMention({
-    player,
-    source: {
+  const source = {
+    sourceMode: input.sourceMode,
+    sourceUrl: input.sourceUrl,
+    sourceSubreddit: limitString(input.sourceSubreddit, 64),
+    sourceAuthor: limitString(input.sourceAuthor, 64),
+    sourcePublishedAt: input.sourcePublishedAt,
+    sourceExternalId: input.sourceExternalId,
+    sourcePostId: input.sourcePostId,
+    title: limitString(input.title, 240),
+    body: normalizeFreeText(input.body),
+    rawPayload: input.rawPayload ?? {
       sourceMode: input.sourceMode,
-      sourceUrl: input.sourceUrl,
-      sourceSubreddit: limitString(input.sourceSubreddit, 64),
-      sourceAuthor: limitString(input.sourceAuthor, 64),
-      sourcePublishedAt: input.sourcePublishedAt,
-      sourceExternalId: input.sourceExternalId,
-      sourcePostId: input.sourcePostId,
-      title: limitString(input.title, 240),
-      body: normalizeFreeText(input.body),
-      rawPayload: input.rawPayload ?? {
-        sourceMode: input.sourceMode,
-      },
     },
-    playedPosition,
-    mentionedRankText: normalizeRank(input.mentionedRankText),
-    sentimentScore: Number(sentimentScore.toFixed(2)),
-    pros: sanitizeReviewTagArray({ tags: input.pros, position: playedPosition, max: 5 }),
-    cons: sanitizeReviewTagArray({ tags: input.cons, position: playedPosition, max: 5 }),
-    summary: limitString(input.summary, MAX_SUMMARY_LENGTH),
-  });
+  } satisfies RedditSourcePayload;
+
+  const ingestRun = await createAdminImportRun(source.sourceSubreddit);
+
+  try {
+    await persistImportedMention({
+      player,
+      source,
+      playedPosition,
+      mentionedRankText: normalizeRank(input.mentionedRankText),
+      sentimentScore: Number(sentimentScore.toFixed(2)),
+      pros: sanitizeReviewTagArray({ tags: input.pros, position: playedPosition, max: 5 }),
+      cons: sanitizeReviewTagArray({ tags: input.cons, position: playedPosition, max: 5 }),
+      summary: limitString(input.summary, MAX_SUMMARY_LENGTH),
+      ingestRunId: ingestRun.id,
+    });
+
+    await completeLegacyIngestRun({
+      runId: ingestRun.id,
+      status: "completed",
+      rawCommentsCount: 1,
+      processedMentionsCount: 1,
+      insertedMentionsCount: 1,
+      errorCount: 0,
+      errorLog: null,
+    });
+  } catch (error) {
+    await completeLegacyIngestRun({
+      runId: ingestRun.id,
+      status: "failed",
+      rawCommentsCount: 0,
+      processedMentionsCount: 0,
+      insertedMentionsCount: 0,
+      errorCount: 1,
+      errorLog: error instanceof Error ? limitString(error.message, 1000) : "Unknown error",
+    });
+    throw error;
+  }
 
   const refreshed = await refreshSentimentSummary();
 
