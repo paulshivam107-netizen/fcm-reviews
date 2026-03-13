@@ -232,6 +232,10 @@ const IMPORT_MODEL = "rule-based-import";
 const IMPORT_MODEL_VERSION = "v1";
 const PLAYER_SELECT_FIELDS = "id,player_name,base_ovr,base_position,program_promo,is_active";
 const REDDIT_IMPORT_SETTINGS_KEY = "reddit_imports";
+const REDDIT_FETCH_HEADERS = {
+  "User-Agent": "fc-mobile-reviews/1.0",
+  Accept: "application/json, text/html;q=0.9,*/*;q=0.8",
+};
 const DEFAULT_REDDIT_IMPORT_SETTINGS: RedditImportSettings = {
   currentMaxBaseOvr: 117,
   maxRankOvrBoost: 5,
@@ -625,6 +629,31 @@ function parseSubredditFromUrl(sourceUrl: string | null) {
   return match[1];
 }
 
+function isSupportedRedditHostname(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  return normalized === "redd.it" || normalized === "reddit.com" || normalized.endsWith(".reddit.com");
+}
+
+function extractCanonicalRedditUrlFromHtml(html: string) {
+  const canonicalMatch = html.match(
+    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
+  );
+  if (canonicalMatch?.[1]) {
+    return canonicalMatch[1];
+  }
+
+  const encodedUrlMatch = html.match(
+    /"url":"(https?:\\\/\\\/[^"]*reddit\.com[^"]*comments[^"]*)"/i
+  );
+  if (!encodedUrlMatch?.[1]) {
+    return null;
+  }
+
+  return encodedUrlMatch[1]
+    .replace(/\\u002F/g, "/")
+    .replace(/\\\//g, "/");
+}
+
 function buildManualSourceFromText(rawText: string, subreddit: string | null) {
   const body = normalizeFreeText(rawText);
   const externalId = `manual:${sha256(body).slice(0, 24)}`;
@@ -664,7 +693,7 @@ function normalizeRedditJsonUrl(inputUrl: string) {
   if (!trimmed) throw new Error("A Reddit URL is required.");
 
   const parsed = new URL(trimmed);
-  if (!(parsed.hostname.includes("reddit.com") || parsed.hostname === "redd.it")) {
+  if (!isSupportedRedditHostname(parsed.hostname)) {
     throw new Error("Only Reddit URLs are supported.");
   }
 
@@ -691,13 +720,50 @@ function normalizeRedditJsonUrl(inputUrl: string) {
   };
 }
 
+async function resolveRedditCanonicalUrl(sourceUrl: string) {
+  const response = await fetch(sourceUrl, {
+    headers: REDDIT_FETCH_HEADERS,
+    cache: "no-store",
+    redirect: "follow",
+  });
+
+  if (!response.ok) {
+    const details = (await response.text()).slice(0, 300);
+    throw new Error(`Reddit URL resolve failed (${response.status}): ${details}`);
+  }
+
+  if (response.url && response.url !== sourceUrl) {
+    return response.url;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) {
+    return sourceUrl;
+  }
+
+  const html = await response.text();
+  return extractCanonicalRedditUrlFromHtml(html) ?? sourceUrl;
+}
+
 async function fetchRedditUrlSource(sourceUrl: string): Promise<RedditSourcePayload> {
-  const { apiUrl, commentId } = normalizeRedditJsonUrl(sourceUrl);
+  let normalizedUrl = sourceUrl;
+  let normalized;
+
+  try {
+    normalized = normalizeRedditJsonUrl(normalizedUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    if (!message.includes("Only Reddit post or comment links are supported.")) {
+      throw error;
+    }
+
+    normalizedUrl = await resolveRedditCanonicalUrl(sourceUrl);
+    normalized = normalizeRedditJsonUrl(normalizedUrl);
+  }
+
+  const { apiUrl, commentId } = normalized;
   const response = await fetch(apiUrl, {
-    headers: {
-      "User-Agent": "fc-mobile-reviews/1.0",
-      Accept: "application/json",
-    },
+    headers: REDDIT_FETCH_HEADERS,
     cache: "no-store",
   });
 
@@ -722,14 +788,14 @@ async function fetchRedditUrlSource(sourceUrl: string): Promise<RedditSourcePayl
   const textBody = selectedComment
     ? String(selectedComment.body ?? "")
     : `${String(post.title ?? "")}\n\n${String(post.selftext ?? "")}`.trim();
-  const externalId = String(selectedComment?.id ?? post.id ?? sha256(sourceUrl).slice(0, 12));
-  const subreddit = String(post.subreddit ?? "").trim() || parseSubredditFromUrl(sourceUrl);
+  const externalId = String(selectedComment?.id ?? post.id ?? sha256(normalizedUrl).slice(0, 12));
+  const subreddit = String(post.subreddit ?? "").trim() || parseSubredditFromUrl(normalizedUrl);
   const author = String((selectedComment?.author ?? post.author ?? "") || "").trim() || null;
   const publishedAt = Number(selectedComment?.created_utc ?? post.created_utc);
 
   return {
     sourceMode: "url",
-    sourceUrl,
+    sourceUrl: normalizedUrl,
     sourceSubreddit: subreddit || null,
     sourceAuthor: author,
     sourcePublishedAt: Number.isFinite(publishedAt)
