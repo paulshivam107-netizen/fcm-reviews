@@ -1,8 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAuthShell } from "@/components/admin-auth-shell";
+import { AdminPageHeader } from "@/components/admin-page-header";
+import { AdminSessionBanner } from "@/components/admin-session-banner";
+import { AdminToolsNav } from "@/components/admin-tools-nav";
+import Link from "next/link";
 import {
   getReviewTagsForPosition,
   REVIEW_POSITION_OPTIONS,
@@ -897,15 +900,10 @@ export default function AdminPlayersPage() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
-      <header className="mb-5">
-        <p className="mb-2 inline-flex items-center rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-lime-200">
-          Admin
-        </p>
-        <h1 className="text-2xl font-bold text-slate-100">Player Catalog</h1>
-        <p className="mt-2 text-sm text-slate-300">
-          Edit base card metadata and archive invalid/outdated cards.
-        </p>
-      </header>
+      <AdminPageHeader
+        title="Player Catalog"
+        description="Edit base card metadata and archive invalid/outdated cards."
+      />
 
       <datalist id="admin-event-options">
             {eventSuggestions.map((eventName) => (
@@ -913,37 +911,9 @@ export default function AdminPlayersPage() {
             ))}
           </datalist>
 
-          <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em] text-slate-400">Signed in</p>
-              <p className="text-sm font-semibold text-slate-100">{adminEmail}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-300 transition hover:bg-white/10"
-            >
-              Sign Out
-            </button>
-          </section>
+          <AdminSessionBanner adminEmail={adminEmail} onLogout={onLogout} />
 
-          <nav className="mb-5 flex gap-2" aria-label="Admin tools">
-            <Link
-              href="/admin/moderation"
-              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
-            >
-              Moderation
-            </Link>
-            <span className="rounded-full bg-accent-500 px-4 py-2 text-sm font-semibold text-slate-950">
-              Players
-            </span>
-            <Link
-              href="/admin/imports"
-              className="rounded-full bg-[var(--bg-pill)] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10"
-            >
-              Imports
-            </Link>
-          </nav>
+          <AdminToolsNav active="players" />
 
           <section className="glass-panel mb-5 rounded-2xl p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
