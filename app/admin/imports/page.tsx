@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { AdminAuthShell } from "@/components/admin-auth-shell";
 import { AdminPlayerItem, AdminPlayersListResponse } from "@/types/admin";
 import {
   AdminRedditImportPreview,
@@ -785,6 +786,25 @@ function AdminImportsPageContent() {
     }
   };
 
+  if (authState !== "authenticated") {
+    return (
+      <AdminAuthShell
+        title="Reddit Imports"
+        description="Import high-signal Reddit reviews manually, and keep a small watchlist of active cards for controlled polling."
+        status={authState}
+        error={pageError}
+        flash={flash}
+        loginEmail={loginEmail}
+        loginPassword={loginPassword}
+        onLoginEmailChange={setLoginEmail}
+        onLoginPasswordChange={setLoginPassword}
+        onSubmit={onSubmitLogin}
+        isLoggingIn={isLoggingIn}
+        signInDescription="Only approved admin emails can access import tools."
+      />
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(163,230,53,0.15),_transparent_26%),linear-gradient(120deg,_rgba(8,15,27,0.97),_rgba(3,22,46,0.96)_55%,_rgba(0,30,70,0.92))] px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
@@ -808,52 +828,7 @@ function AdminImportsPageContent() {
           </div>
         )}
 
-        {authState === "checking" && (
-          <section className="glass-panel rounded-3xl border border-white/10 p-6">
-            <p className="text-sm text-slate-300">Checking admin session...</p>
-          </section>
-        )}
-
-        {authState === "unauthenticated" && (
-          <section className="glass-panel max-w-md rounded-3xl border border-white/10 p-6">
-            <h2 className="mb-2 text-xl font-semibold">Admin Sign In</h2>
-            <p className="mb-4 text-sm text-slate-400">Only approved admin emails can access import tools.</p>
-            <form onSubmit={onSubmitLogin} className="space-y-3">
-              <label className="block text-xs text-slate-300">
-                Email
-                <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={(event) => setLoginEmail(event.target.value)}
-                  placeholder="admin@example.com"
-                  autoComplete="email"
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-                />
-              </label>
-              <label className="block text-xs text-slate-300">
-                Password
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(event) => setLoginPassword(event.target.value)}
-                  autoComplete="current-password"
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={isLoggingIn}
-                className="w-full rounded-xl bg-accent-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isLoggingIn ? "Signing in..." : "Sign In"}
-              </button>
-            </form>
-          </section>
-        )}
-
-        {authState === "authenticated" && (
-          <>
-            <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
+        <section className="glass-panel mb-5 flex items-center justify-between gap-3 rounded-2xl p-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.1em] text-slate-400">Signed in</p>
                 <p className="text-sm font-semibold text-slate-100">{adminEmail}</p>
@@ -1603,8 +1578,6 @@ function AdminImportsPageContent() {
                 ))}
               </div>
             </section>
-          </>
-        )}
       </div>
     </main>
   );

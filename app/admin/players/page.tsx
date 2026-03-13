@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { AdminAuthShell } from "@/components/admin-auth-shell";
 import {
   getReviewTagsForPosition,
   REVIEW_POSITION_OPTIONS,
@@ -875,6 +876,25 @@ export default function AdminPlayersPage() {
     }
   };
 
+  if (authState !== "authenticated") {
+    return (
+      <AdminAuthShell
+        title="Player Catalog"
+        description="Edit base card metadata and archive invalid/outdated cards."
+        status={authState}
+        error={error}
+        flash={feedback}
+        loginEmail={loginEmail}
+        loginPassword={loginPassword}
+        onLoginEmailChange={setLoginEmail}
+        onLoginPasswordChange={setLoginPassword}
+        onSubmit={onSubmitLogin}
+        isLoggingIn={isLoggingIn}
+        signInDescription="Only approved admin emails can access player management tools."
+      />
+    );
+  }
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-sm px-4 pb-12 pt-7 sm:px-6">
       <header className="mb-5">
@@ -887,53 +907,7 @@ export default function AdminPlayersPage() {
         </p>
       </header>
 
-      {authState === "checking" && (
-        <div className="glass-panel rounded-2xl px-4 py-5 text-sm text-slate-300">
-          Checking admin session...
-        </div>
-      )}
-
-      {authState === "unauthenticated" && (
-        <section className="glass-panel mb-5 rounded-2xl p-4">
-          <p className="mb-3 text-xs uppercase tracking-[0.12em] text-slate-300">
-            Admin Sign In
-          </p>
-          <form onSubmit={onSubmitLogin} className="space-y-3">
-            <label className="block text-xs text-slate-300">
-              Email
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={(event) => setLoginEmail(event.target.value)}
-                placeholder="admin@example.com"
-                autoComplete="email"
-                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-              />
-            </label>
-            <label className="block text-xs text-slate-300">
-              Password
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(event) => setLoginPassword(event.target.value)}
-                autoComplete="current-password"
-                className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full rounded-xl bg-accent-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isLoggingIn ? "Signing in..." : "Sign In"}
-            </button>
-          </form>
-        </section>
-      )}
-
-      {authState === "authenticated" && (
-        <>
-          <datalist id="admin-event-options">
+      <datalist id="admin-event-options">
             {eventSuggestions.map((eventName) => (
               <option key={eventName} value={eventName} />
             ))}
@@ -1421,8 +1395,6 @@ export default function AdminPlayersPage() {
               )}
             </section>
           )}
-        </>
-      )}
 
       {feedback && (
         <div className="mb-4 rounded-xl border border-lime-300/30 bg-lime-300/10 px-3 py-2 text-sm text-lime-100">
