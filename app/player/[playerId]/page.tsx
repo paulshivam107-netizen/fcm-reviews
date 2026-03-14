@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { LegalFooter } from "@/components/legal-footer";
+import { buildPlaystyleInsights } from "@/lib/playstyle-insights";
 import { POSITION_GROUPS } from "@/lib/position-groups";
 import {
   PlayerApiResponse,
@@ -242,6 +243,10 @@ export default function PlayerDetailPage() {
   const pros = normalizeInsightTerms(player?.top_pros);
   const cons = normalizeInsightTerms(player?.top_cons);
   const reviewCount = Math.max(0, Number(player?.mention_count ?? 0));
+  const bestForInsights = useMemo(() => buildPlaystyleInsights(pros), [pros]);
+  const weakForInsights = useMemo(() => buildPlaystyleInsights(cons), [cons]);
+  const showPlaystyleFallback =
+    reviewCount < 3 || (bestForInsights.length === 0 && weakForInsights.length === 0);
   const detailTab = useMemo(
     () => getPlayerTabForPosition(player?.base_position ?? "ST"),
     [player?.base_position]
@@ -552,6 +557,82 @@ export default function PlayerDetailPage() {
                     ) : (
                       <p className="text-xs text-slate-400">
                         No major weaknesses highlighted yet.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-100"
+                    title="Derived from community reviews"
+                  >
+                    Playstyle Insights
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Quick read on how this card tends to feel in-game.
+                  </p>
+                </div>
+                <span
+                  title="Derived from community reviews"
+                  className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400"
+                >
+                  Community-derived
+                </span>
+              </div>
+
+              {showPlaystyleFallback && (
+                <p className="mt-3 text-xs text-slate-400">
+                  Not enough reviews yet for full playstyle insights.
+                </p>
+              )}
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">
+                    Best For
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {bestForInsights.length > 0 ? (
+                      bestForInsights.map((item) => (
+                        <span
+                          key={`best-for-${item.label}`}
+                          className="inline-flex items-center gap-1 rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs text-lime-100"
+                        >
+                          <span aria-hidden="true">✓</span>
+                          <span>{item.label}</span>
+                        </span>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400">
+                        No clear strengths mapped yet.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-amber-200">
+                    Weak For
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {weakForInsights.length > 0 ? (
+                      weakForInsights.map((item) => (
+                        <span
+                          key={`weak-for-${item.label}`}
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-xs text-amber-100"
+                        >
+                          <span aria-hidden="true">⚠</span>
+                          <span>{item.label}</span>
+                        </span>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-400">
+                        No major weak playstyles highlighted yet.
                       </p>
                     )}
                   </div>
