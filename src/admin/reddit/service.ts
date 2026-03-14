@@ -233,8 +233,9 @@ const IMPORT_MODEL_VERSION = "v1";
 const PLAYER_SELECT_FIELDS = "id,player_name,base_ovr,base_position,program_promo,is_active";
 const REDDIT_IMPORT_SETTINGS_KEY = "reddit_imports";
 const REDDIT_FETCH_HEADERS = {
-  "User-Agent": "fc-mobile-reviews/1.0",
-  Accept: "application/json, text/html;q=0.9,*/*;q=0.8",
+  "User-Agent": "fc-mobile-reviews/1.0 (+https://fcm-reviews-production.up.railway.app)",
+  Accept: "application/json, text/plain;q=0.9, text/html;q=0.8,*/*;q=0.7",
+  "Accept-Language": "en-US,en;q=0.9",
 };
 const DEFAULT_REDDIT_IMPORT_SETTINGS: RedditImportSettings = {
   currentMaxBaseOvr: 117,
@@ -654,6 +655,42 @@ function extractCanonicalRedditUrlFromHtml(html: string) {
     .replace(/\\\//g, "/");
 }
 
+function buildRedditJsonCandidates(apiUrl: string) {
+  const parsed = new URL(apiUrl);
+  const candidates = [apiUrl];
+
+  if (parsed.hostname === "www.reddit.com") {
+    const oldReddit = new URL(apiUrl);
+    oldReddit.hostname = "old.reddit.com";
+    candidates.push(oldReddit.toString());
+  }
+
+  return [...new Set(candidates)];
+}
+
+async function fetchRedditJson(apiUrl: string) {
+  const candidates = buildRedditJsonCandidates(apiUrl);
+  let lastError: Error | null = null;
+
+  for (const candidateUrl of candidates) {
+    const response = await fetch(candidateUrl, {
+      headers: REDDIT_FETCH_HEADERS,
+      cache: "no-store",
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (response.ok && contentType.includes("application/json")) {
+      return response.json();
+    }
+
+    const details = (await response.text()).slice(0, 300);
+    lastError = new Error(`Reddit fetch failed (${response.status}): ${details}`);
+  }
+
+  throw lastError ?? new Error("Reddit fetch failed.");
+}
+
 function buildManualSourceFromText(rawText: string, subreddit: string | null) {
   const body = normalizeFreeText(rawText);
   const externalId = `manual:${sha256(body).slice(0, 24)}`;
@@ -762,17 +799,7 @@ async function fetchRedditUrlSource(sourceUrl: string): Promise<RedditSourcePayl
   }
 
   const { apiUrl, commentId } = normalized;
-  const response = await fetch(apiUrl, {
-    headers: REDDIT_FETCH_HEADERS,
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = (await response.text()).slice(0, 300);
-    throw new Error(`Reddit fetch failed (${response.status}): ${details}`);
-  }
-
-  const payload = (await response.json()) as Array<Record<string, unknown>>;
+  const payload = (await fetchRedditJson(apiUrl)) as Array<Record<string, unknown>>;
   const listing = payload[0]?.data as { children?: Array<Record<string, unknown>> } | undefined;
   const commentsListing = payload[1]?.data as { children?: Array<Record<string, unknown>> } | undefined;
   const post = (listing?.children?.[0]?.data ?? null) as Record<string, unknown> | null;
@@ -1563,20 +1590,7 @@ async function fetchRedditSearch(subreddit: string, query: string, limit: number
   url.searchParams.set("limit", String(Math.max(1, Math.min(MAX_POSTS_PER_QUERY, limit))));
   url.searchParams.set("raw_json", "1");
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "fc-mobile-reviews/1.0",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = (await response.text()).slice(0, 300);
-    throw new Error(`Reddit search failed (${response.status}): ${details}`);
-  }
-
-  return parseSearchListing((await response.json()) as Record<string, unknown>);
+  return parseSearchListing((await fetchRedditJson(url.toString())) as Record<string, unknown>);
 }
 
 async function getWatchlistRows(activeOnly: boolean) {
