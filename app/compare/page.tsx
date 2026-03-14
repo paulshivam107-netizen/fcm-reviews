@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { LegalFooter } from "@/components/legal-footer";
+import {
+  buildPlaystyleComparisonRows,
+  getPlaystyleComparisonWinner,
+} from "@/lib/playstyle-insights";
 import { POSITION_GROUPS } from "@/lib/position-groups";
 import { CompareApiResponse, CompareCardPayload } from "@/types/compare";
 import { PlayerRow, PlayerTab, PlayersApiResponse } from "@/types/player";
@@ -31,33 +35,6 @@ type PlaystyleRow = {
   winner: Winner;
   value: string;
 };
-
-const PLAYSTYLE_DIMENSIONS = [
-  {
-    label: "Dribbling",
-    keywords: ["dribbling", "skill", "agility", "ball control", "lane change"],
-  },
-  {
-    label: "Finishing",
-    keywords: ["finishing", "finesse", "long shots", "shot power", "curve"],
-  },
-  {
-    label: "Pace",
-    keywords: ["pace", "acceleration", "sprint speed", "speed"],
-  },
-  {
-    label: "Passing",
-    keywords: ["passing", "through ball", "crossing", "playmaking", "key passes"],
-  },
-  {
-    label: "Physicality",
-    keywords: ["physical", "strength", "stamina", "aerial", "heading"],
-  },
-  {
-    label: "Defending",
-    keywords: ["defending", "ball recovery", "interception", "positioning", "shot stopping"],
-  },
-] as const;
 
 function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -225,32 +202,16 @@ function getBestOverallWinner(left: CompareCardPayload, right: CompareCardPayloa
   });
 }
 
-function getDimensionScore(card: CompareCardPayload, keywords: readonly string[]) {
-  const include = (value: string) =>
-    keywords.some((keyword) => value.toLowerCase().includes(keyword.toLowerCase()));
-
-  let score = 0;
-
-  for (const term of card.player.top_pros ?? []) {
-    if (include(term.text)) score += term.count;
-  }
-
-  for (const term of card.player.top_cons ?? []) {
-    if (include(term.text)) score -= term.count * 0.75;
-  }
-
-  return score;
-}
-
 function buildPlaystyleRows(left: CompareCardPayload, right: CompareCardPayload) {
-  const rows = PLAYSTYLE_DIMENSIONS.map((dimension) => {
-    const leftScore = getDimensionScore(left, dimension.keywords);
-    const rightScore = getDimensionScore(right, dimension.keywords);
-    if (leftScore === 0 && rightScore === 0) return null;
-
-    const winner = compareNullableNumbers(leftScore, rightScore, { epsilon: 0.25 });
+  const rows = buildPlaystyleComparisonRows({
+    leftPros: left.player.top_pros,
+    leftCons: left.player.top_cons,
+    rightPros: right.player.top_pros,
+    rightCons: right.player.top_cons,
+  }).map((row) => {
+    const winner = getPlaystyleComparisonWinner(row);
     return {
-      label: dimension.label,
+      label: row.label,
       winner,
       value: winnerName(
         winner,
@@ -262,7 +223,6 @@ function buildPlaystyleRows(left: CompareCardPayload, right: CompareCardPayload)
   });
 
   return rows
-    .filter((row): row is NonNullable<typeof row> => row !== null)
     .slice(0, 5);
 }
 
